@@ -3618,10 +3618,23 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             render_st = ClientGUICommon.BetterStaticText( render_panel, label = 'Namespaced tags are stored and directly edited in hydrus as "namespace:subtag", but most presentation windows can display them differently.' )
             
             render_st.SetWrapWidth( 400 )
+
+            #### drag panel
+            drag_panel = ClientGUICommon.StaticBox( self, 'drag n drop filename rendering' )
+
+            drag_st = ClientGUICommon.BetterStaticText( drag_panel,
+                                                        label='Format the filename of drag n drop files using namespaces and separators.' )
+            drag_st.SetWrapWidth( 400 )
+            ####
+
             
             self._show_namespaces = wx.CheckBox( render_panel )
             self._namespace_connector = wx.TextCtrl( render_panel )
-            
+
+            ###
+            self._drag_n_drop_phrase = wx.TextCtrl( drag_panel )
+            ###
+
             #
             
             namespace_colours_panel = ClientGUICommon.StaticBox( self, 'namespace colours' )
@@ -3640,6 +3653,10 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._namespace_connector.SetValue( new_options.GetString( 'namespace_connector' ) )
             
             #
+
+            ###
+            self._drag_n_drop_phrase.SetValue( new_options.GetString( 'drag_n_drop_phrase' ) )
+            ###
             
             namespace_colours_panel.Add( self._namespace_colours, CC.FLAGS_EXPAND_BOTH_WAYS )
             namespace_colours_panel.Add( self._new_namespace_colour, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -3674,6 +3691,17 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             render_panel.Add( gridbox, CC.FLAGS_EXPAND_PERPENDICULAR )
             
             vbox.Add( render_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+
+            # drag_gridbox = ClientGUICommon.WrapInGrid(drag_panel, rows)
+
+            drag_examples = ClientGUICommon.DragPatternButton( drag_panel )
+
+            drag_panel.Add( drag_st, CC.FLAGS_EXPAND_PERPENDICULAR )
+            drag_panel.Add( self._drag_n_drop_phrase, CC.FLAGS_EXPAND_PERPENDICULAR )
+            drag_panel.Add( drag_examples, CC.FLAGS_EXPAND_PERPENDICULAR )
+
+            vbox.Add( drag_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+
             
             #
             
@@ -3738,7 +3766,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options.SetBoolean( 'show_namespaces', self._show_namespaces.GetValue() )
             self._new_options.SetString( 'namespace_connector', self._namespace_connector.GetValue() )
-            
+            self._new_options.SetString( 'drag_n_drop_phrase', self._drag_n_drop_phrase.GetValue() )
+
             HC.options[ 'namespace_colours' ] = self._namespace_colours.GetNamespaceColours()
             
         

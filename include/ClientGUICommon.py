@@ -1540,8 +1540,46 @@ class AlphaColourControl( wx.Panel ):
         self._colour_picker.SetColour( picker_colour )
         
         self._alpha_selector.SetValue( a )
-        
-    
+
+
+class DragPatternButton( BetterButton ):
+
+    def __init__( self, parent ):
+        BetterButton.__init__( self, parent, 'pattern shortcuts', self._Hit )
+
+    def _Hit( self ):
+        menu = wx.Menu()
+
+        ClientGUIMenus.AppendMenuLabel( menu, 'click on a phrase to copy to clipboard' )
+
+        ClientGUIMenus.AppendSeparator( menu )
+
+        ClientGUIMenus.AppendMenuItem( self, menu, 'the file\'s hash - {hash}', 'copy "{hash}" to the clipboard',
+                                       HG.client_controller.pub, 'clipboard', 'text', '{hash}' )
+        ClientGUIMenus.AppendMenuItem( self, menu, 'the file\'s crc32 hash - {shorthash}',
+                                       'copy "{shorthash}" to the clipboard',
+                                       HG.client_controller.pub, 'clipboard', 'text', '{shorthash}' )
+        ClientGUIMenus.AppendMenuItem( self, menu, 'all the file\'s tags - {tags}', 'copy "{tags}" to the clipboard',
+                                       HG.client_controller.pub, 'clipboard', 'text', '{tags}' )
+        ClientGUIMenus.AppendMenuItem( self, menu, 'all the file\'s non-namespaced tags - {nn tags}',
+                                       'copy "{nn tags}" to the clipboard', HG.client_controller.pub, 'clipboard',
+                                       'text', '{nn tags}' )
+
+        ClientGUIMenus.AppendSeparator( menu )
+
+        ClientGUIMenus.AppendMenuItem( self, menu, u'all instances of a particular namespace - [\u2026]',
+                                       u'copy "[\u2026]" to the clipboard', HG.client_controller.pub, 'clipboard',
+                                       'text', u'[\u2026]' )
+
+        ClientGUIMenus.AppendSeparator( menu )
+
+        ClientGUIMenus.AppendMenuItem( self, menu, u'a particular tag, if the file has it - (\u2026)',
+                                       u'copy "(\u2026)" to the clipboard', HG.client_controller.pub, 'clipboard',
+                                       'text', u'(\u2026)' )
+
+        HG.client_controller.PopupMenu( self, menu )
+
+
 class ExportPatternButton( BetterButton ):
     
     def __init__( self, parent ):

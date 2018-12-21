@@ -5,6 +5,9 @@ import json
 import os
 import wx
 
+from include.ClientExporting import ParseExportPhrase, GenerateDraggedFilename
+
+
 def DoFileExportDragDrop( window, page_key, media, cmd_down ):
     
     drop_source = wx.DropSource( window )
@@ -71,21 +74,37 @@ def DoFileExportDragDrop( window, page_key, media, cmd_down ):
     if do_temp_dnd and os.path.exists( temp_dir ):
         
         dnd_paths = []
-        
-        for original_path in original_paths:
-            
-            filename = os.path.basename( original_path )
-            
+
+        ##use the media list instead of original paths
+
+        for media in media:
+
+            # filename = os.path.basename( original_path )
+            # print(filename)
+
+            terms = ParseExportPhrase( new_options.GetString( "drag_n_drop_phrase" ) )
+            # print(terms)
+
+            filename = GenerateDraggedFilename( temp_dir, media, terms )
+            # print(filename)
+
             dnd_path = os.path.join( temp_dir, filename )
-            
+
             if not os.path.exists( dnd_path ):
-                
+                # I hate to call GetFilePath(...) twice, but the only other way I
+                # thought of was a dict with the media object and the path, but that would be an eyesore
+
+                hash = media.GetHash()
+                mime = media.GetMime()
+
+                original_path = client_files_manager.GetFilePath( hash, mime, check_file_exists=False )
+
                 HydrusPaths.MirrorFile( original_path, dnd_path )
-                
-            
+
             dnd_paths.append( dnd_path )
-            
-        
+
+            print(filename, " ", dnd_path, " ", dnd_paths)
+
         flags = wx.Drag_AllowMove
         
     else:

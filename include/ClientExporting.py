@@ -1,3 +1,5 @@
+import zlib
+
 import ClientConstants as CC
 import ClientPaths
 import ClientSearch
@@ -13,6 +15,124 @@ import re
 import stat
 
 MAX_PATH_LENGTH = 245 # bit of padding from 255 for .txt neigbouring and other surprises
+
+
+def GenerateDraggedFilename( destination_directory, media, terms ):
+    def clean_tag_text( t ):
+
+        if HC.PLATFORM_WINDOWS:
+
+            t = re.sub( r'\\', '_', t, flags=re.UNICODE )
+
+        else:
+
+            t = re.sub( '/', '_', t, flags=re.UNICODE )
+
+        return t
+
+    if len( destination_directory ) > (MAX_PATH_LENGTH - 10):
+        raise Exception( 'The destination directory is too long!' )
+
+    filename = ''
+
+    for (term_type, term) in terms:
+
+        tags_manager = media.GetTagsManager()
+
+        if term_type == 'string':
+
+            filename += term
+
+        elif term_type == 'namespace':
+
+            tags = tags_manager.GetNamespaceSlice( (term,) )
+
+            subtags = [ HydrusTags.SplitTag( tag )[ 1 ] for tag in tags ]
+
+            subtags.sort()
+
+            filename += clean_tag_text( ', '.join( subtags ) )
+
+        elif term_type == 'predicate':
+
+            if term in ('tags', 'nn tags'):
+
+                current = tags_manager.GetCurrent()
+                pending = tags_manager.GetPending()
+
+                tags = list( current.union( pending ) )
+
+                if term == 'nn tags':
+
+                    tags = [ tag for tag in tags if ':' not in tag ]
+
+                else:
+
+                    tags = [ HydrusTags.SplitTag( tag )[ 1 ] for tag in tags ]
+
+                tags.sort()
+
+                filename += clean_tag_text( ', '.join( tags ) )
+
+            elif term == 'hash':
+
+                hash = media.GetHash()
+
+                filename += hash.encode( 'hex' )
+
+            elif term == 'shorthash':
+
+                hash = media.GetHash()
+
+                filename += hex( zlib.crc32( hash ) % 2 ** 32 )[ 2:-1 ]
+
+
+        elif term_type == 'tag':
+
+            tag = term
+
+            (namespace, subtag) = HydrusTags.SplitTag( tag )
+
+            if tags_manager.HasTag( subtag ):
+                filename += clean_tag_text( subtag )
+
+    # if it's still empty, add the standard hash
+    if filename == '':
+        hash = media.GetHash()
+
+        filename += hash.encode( 'hex' )
+
+    if HC.PLATFORM_WINDOWS:
+
+        # replace many consecutive backspace with single backspace
+        filename = re.sub( r'\\+', r'\\', filename, flags=re.UNICODE )
+
+        # /, :, *, ?, ", <, >, |
+        filename = re.sub( r'/|:|\*|\?|"|<|>|\|', '_', filename, flags=re.UNICODE )
+
+    else:
+
+        filename = re.sub( '/', '_', filename, flags=re.UNICODE )
+
+    #
+
+    mime = media.GetMime()
+
+    ext = HC.mime_ext_lookup[ mime ]
+
+    if filename.endswith( ext ):
+        filename = filename[ : - len( ext ) ]
+
+    example_dest_path = os.path.join( destination_directory, filename + ext )
+
+    excess_chars = len( example_dest_path ) - MAX_PATH_LENGTH
+
+    if excess_chars > 0:
+        filename = filename[ : - excess_chars ]
+
+    filename = filename + ext
+
+    return filename
 
 def GenerateExportFilename( destination_directory, media, terms ):
     
