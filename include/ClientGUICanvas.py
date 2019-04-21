@@ -204,7 +204,7 @@ def CalculateMediaContainerSize( media, zoom, action ):
         
         if media.GetMime() in HC.MIMES_WITH_THUMBNAILS:
             
-            ( thumb_width, thumb_height ) = HydrusImageHandling.GetThumbnailResolution( media.GetResolution(), HC.UNSCALED_THUMBNAIL_DIMENSIONS )
+            ( thumb_width, thumb_height ) = HydrusImageHandling.GetThumbnailResolution( media.GetResolution(), HG.client_controller.options[ 'thumbnail_dimensions' ] )
             
             height = height + thumb_height
             
@@ -232,6 +232,10 @@ def CalculateMediaSize( media, zoom ):
     
     return ( media_width, media_height )
     
+def IsStaticImage( media ):
+    
+    return media.GetMime() in HC.IMAGES and not ShouldHaveAnimationBar( media )
+    
 def ShouldHaveAnimationBar( media ):
     
     is_animated_gif = media.GetMime() == HC.IMAGE_GIF and media.HasDuration()
@@ -257,13 +261,14 @@ class Animation( wx.Window ):
         self._drag_happened = False
         self._left_down_event = None
         
-        self._a_frame_has_been_drawn = False
+        self._something_valid_has_been_drawn = False
         self._has_played_once_through = False
         
         self._num_frames = 1
         
         self._current_frame_index = 0
         self._current_frame_drawn = False
+        self._current_timestamp_ms = None
         self._next_frame_due_at = HydrusData.GetNowPrecise()
         self._slow_frame_score = 1.0
         
@@ -281,36 +286,6 @@ class Animation( wx.Window ):
         self.Bind( wx.EVT_ERASE_BACKGROUND, self.EventEraseBackground )
         
     
-    def __del__( self ):
-        
-        if self._video_container is not None:
-            
-            self._video_container.Stop()
-            
-            self._video_container = None
-            
-        
-        if self._frame_bmp is not None:
-            
-            if wx.App.IsMainLoopRunning():
-                
-                wx.CallAfter( self._frame_bmp.Destroy )
-                
-            
-            self._frame_bmp = None
-            
-        
-        if self._canvas_bmp is not None:
-            
-            if wx.App.IsMainLoopRunning():
-                
-                wx.CallAfter( self._canvas_bmp.Destroy )
-                
-            
-            self._canvas_bmp = None
-            
-        
-    
     def _DrawFrame( self, dc ):
         
         current_frame = self._video_container.GetFrame( self._current_frame_index )
@@ -321,14 +296,16 @@ class Animation( wx.Window ):
         
         if self._frame_bmp is not None and self._frame_bmp.GetSize() != current_frame.GetSize():
             
-            wx.CallAfter( self._frame_bmp.Destroy )
+            HG.client_controller.bitmap_manager.ReleaseBitmap( self._frame_bmp )
             
             self._frame_bmp = None
             
         
         if self._frame_bmp is None:
             
-            self._frame_bmp = wx.Bitmap( frame_width, frame_height, current_frame.GetDepth() * 8 )
+            self._frame_bmp = HG.client_controller.bitmap_manager.GetBitmap( frame_width, frame_height, current_frame.GetDepth() * 8 )
+            
+            #self._frame_bmp = wx.Bitmap( frame_width, frame_height, current_frame.GetDepth() * 8 )
             
         
         current_frame.CopyToWxBitmap( self._frame_bmp )
@@ -386,16 +363,18 @@ class Animation( wx.Window ):
             self._next_frame_due_at = next_frame_ideally_due
             
         
-        self._a_frame_has_been_drawn = True
+        self._something_valid_has_been_drawn = True
         
     
-    def _DrawWhite( self, dc ):
+    def _DrawABlankFrame( self, dc ):
         
         new_options = HG.client_controller.new_options
         
         dc.SetBackground( wx.Brush( new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND ) ) )
         
         dc.Clear()
+        
+        self._something_valid_has_been_drawn = True
         
     
     def CurrentFrame( self ):
@@ -410,16 +389,21 @@ class Animation( wx.Window ):
     
     def EventPaint( self, event ):
         
-        if self._video_container is None:
+        if self._canvas_bmp is None:
+            
+            return
+            
+        
+        if self._video_container is None and self._media is not None:
             
             self._video_container = ClientRendering.RasterContainerVideo( self._media, self.GetClientSize(), init_position = self._current_frame_index )
             
         
         dc = wx.BufferedPaintDC( self, self._canvas_bmp )
         
-        if not self._a_frame_has_been_drawn:
+        if not self._something_valid_has_been_drawn:
             
-            self._DrawWhite( dc )
+            self._DrawABlankFrame( dc )
             
         
     
@@ -493,13 +477,13 @@ class Animation( wx.Window ):
                 
                 if self._canvas_bmp is not None:
                     
-                    wx.CallAfter( self._canvas_bmp.Destroy )
+                    HG.client_controller.bitmap_manager.ReleaseBitmap( self._canvas_bmp )
                     
                 
-                self._canvas_bmp = wx.Bitmap( my_width, my_height, 24 )
+                self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, my_height, 24 )
                 
                 self._current_frame_drawn = False
-                self._a_frame_has_been_drawn = False
+                self._something_valid_has_been_drawn = False
                 
                 self.Refresh()
                 
@@ -551,8 +535,13 @@ class Animation( wx.Window ):
             
             buffer_indices = self._video_container.GetBufferIndices()
             
+            if self._current_timestamp_ms is None and self._video_container.IsInitialised():
+                
+                self._current_timestamp_ms = self._video_container.GetTimestampMS( self._current_frame_index )
+                
+            
         
-        return ( self._current_frame_index, self._paused, buffer_indices )
+        return ( self._current_frame_index, self._current_timestamp_ms, self._paused, buffer_indices )
         
     
     def GotoFrame( self, frame_index ):
@@ -562,6 +551,9 @@ class Animation( wx.Window ):
             if frame_index != self._current_frame_index:
                 
                 self._current_frame_index = frame_index
+                self._current_timestamp_ms = None
+                
+                self._next_frame_due_at = HydrusData.GetNowPrecise()
                 
                 self._video_container.GetReadyForFrame( self._current_frame_index )
                 
@@ -597,20 +589,28 @@ class Animation( wx.Window ):
         self._paused = not self._paused
         
     
-    def SetMedia( self, media, start_paused ):
+    def SetMedia( self, media, start_paused = False ):
         
         self._media = media
         
         self._drag_happened = False
         self._left_down_event = None
         
-        self._a_frame_has_been_drawn = False
+        self._something_valid_has_been_drawn = False
         self._has_played_once_through = False
         
-        self._num_frames = self._media.GetNumFrames()
+        if self._media is not None:
+            
+            self._num_frames = self._media.GetNumFrames()
+            
+        else:
+            
+            self._num_frames = 1
+            
         
         self._current_frame_index = int( ( self._num_frames - 1 ) * HC.options[ 'animation_start_position' ] )
         self._current_frame_drawn = False
+        self._current_timestamp_ms = None
         self._next_frame_due_at = HydrusData.GetNowPrecise()
         self._slow_frame_score = 1.0
         
@@ -625,12 +625,29 @@ class Animation( wx.Window ):
         
         self._frame_bmp = None
         
-        HG.client_controller.gui.RegisterAnimationUpdateWindow( self )
+        if self._media is None:
+            
+            HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+            
+        else:
+            
+            HG.client_controller.gui.RegisterAnimationUpdateWindow( self )
+            
+            self.Refresh()
+            
         
-        self.Refresh()
+    
+    def SetNoneMedia( self ):
+        
+        self.SetMedia( None )
         
     
     def TIMERAnimationUpdate( self ):
+        
+        if self._media is None:
+            
+            return
+            
         
         try:
             
@@ -646,7 +663,17 @@ class Animation( wx.Window ):
                         
                         if self._current_frame_index == 0:
                             
+                            self._current_timestamp_ms = 0
                             self._has_played_once_through = True
+                            
+                        else:
+                            
+                            if self._current_timestamp_ms is not None and self._video_container is not None and self._video_container.IsInitialised():
+                                
+                                duration_ms = self._video_container.GetDuration( self._current_frame_index - 1 )
+                                
+                                self._current_timestamp_ms += duration_ms
+                                
                             
                         
                         self._current_frame_drawn = False
@@ -688,6 +715,7 @@ class AnimationBar( wx.Window ):
         self.SetCursor( wx.Cursor( wx.CURSOR_ARROW ) )
         
         self._media_window = None
+        self._duration_ms = 1000
         self._num_frames = 1
         self._last_drawn_info = None
         
@@ -701,15 +729,27 @@ class AnimationBar( wx.Window ):
         self.Bind( wx.EVT_ERASE_BACKGROUND, self.EventEraseBackground )
         
     
+    def _DrawBlank( self, dc ):
+        
+        new_options = HG.client_controller.new_options
+        
+        dc.SetBackground( wx.Brush( new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND ) ) )
+        
+        dc.Clear()
+        
+        self._dirty = False
+        
+    
     def _GetAnimationBarStatus( self ):
         
         if FLASHWIN_OK and isinstance( self._media_window, wx.lib.flashwin.FlashWindow ):
             
             current_frame = self._media_window.CurrentFrame()
+            current_timestamp_ms = None
             paused = False
             buffer_indices = None
             
-            return ( current_frame, paused, buffer_indices )
+            return ( current_frame, current_timestamp_ms, paused, buffer_indices )
             
         else:
             
@@ -733,7 +773,7 @@ class AnimationBar( wx.Window ):
         
         self._last_drawn_info = self._GetAnimationBarStatus()
         
-        ( current_frame_index, paused, buffer_indices )  = self._last_drawn_info
+        ( current_frame_index, current_timestamp_ms, paused, buffer_indices )  = self._last_drawn_info
         
         ( my_width, my_height ) = self._canvas_bmp.GetSize()
         
@@ -813,6 +853,11 @@ class AnimationBar( wx.Window ):
         dc.SetFont( wx.SystemSettings.GetFont( wx.SYS_DEFAULT_GUI_FONT ) )
         
         s = HydrusData.ConvertValueRangeToPrettyString( current_frame_index + 1, self._num_frames )
+        
+        if current_timestamp_ms is not None:
+            
+            s += ' - {}'.format( HydrusData.ConvertValueRangeToScanbarTimestampsMS( current_timestamp_ms, self._duration_ms ) )
+            
         
         ( x, y ) = dc.GetTextExtent( s )
         
@@ -904,7 +949,14 @@ class AnimationBar( wx.Window ):
             
             if self._dirty:
                 
-                self._Redraw( dc )
+                if self._media_window is None:
+                    
+                    self._DrawBlank( dc )
+                    
+                else:
+                    
+                    self._Redraw( dc )
+                    
                 
             
         
@@ -930,10 +982,10 @@ class AnimationBar( wx.Window ):
                 
                 if self._canvas_bmp is not None:
                     
-                    wx.CallAfter( self._canvas_bmp.Destroy )
+                    HG.client_controller.bitmap_manager.ReleaseBitmap( self._canvas_bmp )
                     
                 
-                self._canvas_bmp = wx.Bitmap( my_width, my_height, 24 )
+                self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, my_height, 24 )
                 
                 self._dirty = True
                 
@@ -945,6 +997,7 @@ class AnimationBar( wx.Window ):
     def SetMediaAndWindow( self, media, media_window ):
         
         self._media_window = media_window
+        self._duration_ms = max( media.GetDuration(), 1 )
         self._num_frames = max( media.GetNumFrames(), 1 )
         self._last_drawn_info = None
         
@@ -956,12 +1009,18 @@ class AnimationBar( wx.Window ):
         
         self._dirty = True
         
+        self.Refresh()
+        
     
     def SetNoneMedia( self ):
         
         self._media_window = None
         
         HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+        
+        self._dirty = True
+        
+        self.Refresh()
         
     
     def TIMERAnimationUpdate( self ):
@@ -1026,7 +1085,7 @@ class CanvasFrame( ClientGUITopLevelWindows.FrameThatResizes ):
             self.ShowFullScreen( False, wx.FULLSCREEN_ALL )
             
         
-        self._canvas_window.CleanBeforeClose()
+        self._canvas_window.CleanBeforeDestroy()
         
         self.DestroyLater()
         
@@ -1141,7 +1200,7 @@ class Canvas( wx.Window ):
         
         self._UpdateBackgroundColour()
         
-        self._canvas_bmp = wx.Bitmap( 20, 20, 24 )
+        self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( 20, 20, 24 )
         
         self.Bind( wx.EVT_SIZE, self.EventResize )
         
@@ -1331,7 +1390,9 @@ class Canvas( wx.Window ):
             
             hashes = { self._current_media.GetHash() }
             
-            HG.client_controller.Write( 'content_updates', { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes ) ] } )
+            reason = 'Deleted from Preview or Media Viewer.'
+            
+            HG.client_controller.Write( 'content_updates', { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] } )
             
         
     
@@ -1650,7 +1711,7 @@ class Canvas( wx.Window ):
         
         with ClientGUITopLevelWindows.DialogManage( self, title ) as dlg:
             
-            panel = ClientGUIScrolledPanelsManagement.ManageURLsPanel( dlg, self._current_media )
+            panel = ClientGUIScrolledPanelsManagement.ManageURLsPanel( dlg, ( self._current_media, ) )
             
             dlg.SetPanel( panel )
             
@@ -1742,6 +1803,14 @@ class Canvas( wx.Window ):
             HydrusPaths.OpenFileLocation( path )
             
             self._MediaFocusWentToExternalProgram()
+            
+        
+    
+    def _OpenKnownURL( self ):
+        
+        if self._current_media is not None:
+            
+            ClientGUIMedia.DoOpenKnownURLFromShortcut( self, self._current_media )
             
         
     
@@ -2052,9 +2121,11 @@ class Canvas( wx.Window ):
             
         
     
-    def CleanBeforeClose( self ):
+    def CleanBeforeDestroy( self ):
         
         self._SaveCurrentMediaViewTime()
+        
+        self.SetMedia( None )
         
     
     def EventCharHook( self, event ):
@@ -2118,9 +2189,9 @@ class Canvas( wx.Window ):
             
             ( my_width, my_height ) = self.GetClientSize()
             
-            wx.CallAfter( self._canvas_bmp.Destroy )
+            HG.client_controller.bitmap_manager.ReleaseBitmap( self._canvas_bmp )
             
-            self._canvas_bmp = wx.Bitmap( my_width, my_height, 24 )
+            self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, my_height, 24 )
             
             if self._current_media is not None:
                 
@@ -2243,6 +2314,10 @@ class Canvas( wx.Window ):
             elif action == 'manage_file_notes':
                 
                 self._ManageNotes()
+                
+            elif action == 'open_known_url':
+                
+                self._OpenKnownURL()
                 
             elif action == 'archive_file':
                 
@@ -3117,7 +3192,18 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             first_hash = first_media.GetHash()
             second_hash = second_media.GetHash()
             
-            service_keys_to_content_updates = duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media )
+            if duplicate_type in ( HC.DUPLICATE_BETTER, HC.DUPLICATE_WORSE, HC.DUPLICATE_LARGER_BETTER, HC.DUPLICATE_SMALLER_BETTER, HC.DUPLICATE_BETTER_OR_WORSE ):
+                
+                file_deletion_reason = 'better/worse'
+                
+            else:
+                
+                file_deletion_reason = HC.duplicate_type_string_lookup[ duplicate_type ]
+                
+            
+            file_deletion_reason = 'Deleted in Duplicate Filter ({}).'.format( file_deletion_reason )
+            
+            service_keys_to_content_updates = duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media, file_deletion_reason = file_deletion_reason )
             
             pair_info.append( ( duplicate_type, first_hash, second_hash, service_keys_to_content_updates ) )
             
@@ -3185,12 +3271,16 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                     
                     hashes = { self._current_media.GetHash() }
                     
+                    reason = 'Deleted manually in Duplicate Filter.'
+                    
                 elif value == 'both':
                     
                     hashes = { self._current_media.GetHash(), self._media_list.GetNext( self._current_media ).GetHash() }
                     
+                    reason = 'Deleted manually in Duplicate Filter, along with its potential duplicate.'
+                    
                 
-                HG.client_controller.Write( 'content_updates', { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes ) ] } )
+                HG.client_controller.Write( 'content_updates', { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] } )
                 
             
         
@@ -3903,22 +3993,10 @@ class CanvasMediaList( ClientMedia.ListeningMediaList, CanvasWithHovers ):
         previous = self._current_media
         next = self._current_media
         
-        if self._just_started:
-            
-            delay_base = 0.8
-            
-            num_to_go_back = 1
-            num_to_go_forward = 1
-            
-            self._just_started = False
-            
-        else:
-            
-            delay_base = 0.4
-            
-            num_to_go_back = 3
-            num_to_go_forward = 5
-            
+        delay_base = 0.1
+        
+        num_to_go_back = 3
+        num_to_go_forward = 5
         
         # if media_looked_at nukes the list, we want shorter delays, so do next first
         
@@ -3958,8 +4036,6 @@ class CanvasMediaList( ClientMedia.ListeningMediaList, CanvasWithHovers ):
             to_render.append( ( previous, delay ) )
             
         
-        ( my_width, my_height ) = self.GetClientSize()
-        
         image_cache = HG.client_controller.GetCache( 'images' )
         
         for ( media, delay ) in to_render:
@@ -3967,7 +4043,7 @@ class CanvasMediaList( ClientMedia.ListeningMediaList, CanvasWithHovers ):
             hash = media.GetHash()
             mime = media.GetMime()
             
-            if mime in ( HC.IMAGE_JPEG, HC.IMAGE_PNG ):
+            if IsStaticImage( media ):
                 
                 if not image_cache.HasImageRenderer( hash ):
                     
@@ -4178,9 +4254,11 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
                         
                         service_keys_and_content_updates = []
                         
+                        reason = 'Deleted in Archive/Delete filter.'
+                        
                         for chunk_of_hashes in HydrusData.SplitListIntoChunks( self._deleted_hashes, 64 ):
                             
-                            service_keys_and_content_updates.append( ( CC.LOCAL_FILE_SERVICE_KEY, HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) ) )
+                            service_keys_and_content_updates.append( ( CC.LOCAL_FILE_SERVICE_KEY, HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes, reason = reason ) ) )
                             
                         
                         service_keys_and_content_updates.append( ( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, self._kept_hashes ) ) )
@@ -4947,7 +5025,13 @@ class MediaContainer( wx.Window ):
         self._embed_button = EmbedButton( self )
         self._embed_button.Bind( wx.EVT_LEFT_DOWN, self.EventEmbedButton )
         
+        self._animation_window = Animation( self )
         self._animation_bar = AnimationBar( self )
+        self._static_image_window = StaticImage( self )
+        
+        self._animation_window.Hide()
+        self._animation_bar.Hide()
+        self._static_image_window.Hide()
         
         self.Hide()
         
@@ -4956,11 +5040,19 @@ class MediaContainer( wx.Window ):
         self.Bind( wx.EVT_ERASE_BACKGROUND, self.EventEraseBackground )
         
     
-    def _DestroyThisMediaWindow( self, media_window ):
+    def _DestroyOrHideThisMediaWindow( self, media_window ):
         
         if media_window is not None:
             
-            media_window.DestroyLater()
+            if isinstance( media_window, ( Animation, StaticImage ) ):
+                
+                media_window.SetNoneMedia()
+                media_window.Hide()
+                
+            else:
+                
+                media_window.DestroyLater()
+                
             
         
     
@@ -5034,10 +5126,12 @@ class MediaContainer( wx.Window ):
                         
                     else:
                         
-                        self._media_window = Animation( self )
+                        self._animation_window.Show()
+                        
+                        self._media_window = self._animation_window
                         
                     
-                    self._media_window.SetMedia( self._media, start_paused )
+                    self._media_window.SetMedia( self._media, start_paused = start_paused )
                     
                 
                 if ShouldHaveAnimationBar( self._media ):
@@ -5059,7 +5153,9 @@ class MediaContainer( wx.Window ):
                     
                 else:
                     
-                    self._media_window = StaticImage( self )
+                    self._static_image_window.Show()
+                    
+                    self._media_window = self._static_image_window
                     
                 
                 self._media_window.SetMedia( self._media )
@@ -5070,7 +5166,7 @@ class MediaContainer( wx.Window ):
         
         if old_media_window is not None and destroy_old_media_window:
             
-            self._DestroyThisMediaWindow( old_media_window )
+            self._DestroyOrHideThisMediaWindow( old_media_window )
             
         
     
@@ -5260,7 +5356,7 @@ class MediaContainer( wx.Window ):
         
         self._HideAnimationBar()
         
-        self._DestroyThisMediaWindow( self._media_window )
+        self._DestroyOrHideThisMediaWindow( self._media_window )
         
         self._media_window = None
         
@@ -5298,9 +5394,9 @@ class MediaContainer( wx.Window ):
         
         self._media = None
         
-        self._DestroyThisMediaWindow( self._media_window )
-        
         self._HideAnimationBar()
+        
+        self._DestroyOrHideThisMediaWindow( self._media_window )
         
         self._media_window = None
         
@@ -5444,10 +5540,10 @@ class EmbedButton( wx.Window ):
                 
                 if self._canvas_bmp is not None:
                     
-                    wx.CallAfter( self._canvas_bmp.Destroy )
+                    HG.client_controller.bitmap_manager.ReleaseBitmap( self._canvas_bmp )
                     
                 
-                self._canvas_bmp = wx.Bitmap( my_width, my_height, 24 )
+                self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, my_height, 24 )
                 
                 self._SetDirty()
                 
@@ -5472,7 +5568,7 @@ class EmbedButton( wx.Window ):
             hash = self._media.GetHash()
             mime = self._media.GetMime()
             
-            thumbnail_path = HG.client_controller.client_files_manager.GetFullSizeThumbnailPath( hash, mime )
+            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( hash, mime )
             
             self._thumbnail_bmp = ClientRendering.GenerateHydrusBitmap( thumbnail_path, mime ).GetWxBitmap()
             
@@ -5503,15 +5599,15 @@ class OpenExternallyPanel( wx.Panel ):
             hash = self._media.GetHash()
             mime = self._media.GetMime()
             
-            thumbnail_path = HG.client_controller.client_files_manager.GetFullSizeThumbnailPath( hash, mime )
+            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( hash, mime )
             
             bmp = ClientRendering.GenerateHydrusBitmap( thumbnail_path, mime ).GetWxBitmap()
             
-            thumbnail = ClientGUICommon.BufferedWindowIcon( self, bmp )
+            thumbnail_window = ClientGUICommon.BufferedWindowIcon( self, bmp )
             
-            thumbnail.Bind( wx.EVT_LEFT_DOWN, self.EventButton )
+            thumbnail_window.Bind( wx.EVT_LEFT_DOWN, self.EventButton )
             
-            vbox.Add( thumbnail, CC.FLAGS_CENTER )
+            vbox.Add( thumbnail_window, CC.FLAGS_CENTER )
             
         
         m_text = HC.mime_string_lookup[ media.GetMime() ]
@@ -5587,7 +5683,7 @@ class StaticImage( wx.Window ):
             
             dc.DrawBitmap( wx_bitmap, 0, 0 )
             
-            wx.CallAfter( wx_bitmap.Destroy )
+            HG.client_controller.bitmap_manager.ReleaseBitmap( wx_bitmap )
             
             self._is_rendered = True
             
@@ -5615,6 +5711,11 @@ class StaticImage( wx.Window ):
         
     
     def EventPaint( self, event ):
+        
+        if self._canvas_bmp is None:
+            
+            return
+            
         
         dc = wx.BufferedPaintDC( self, self._canvas_bmp )
         
@@ -5657,10 +5758,10 @@ class StaticImage( wx.Window ):
                 
                 if self._canvas_bmp is not None:
                     
-                    wx.CallAfter( self._canvas_bmp.Destroy )
+                    HG.client_controller.bitmap_manager.ReleaseBitmap( self._canvas_bmp )
                     
                 
-                self._canvas_bmp = wx.Bitmap( my_width, my_height, 24 )
+                self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, my_height, 24 )
                 
                 self._first_background_drawn = False
                 
@@ -5689,16 +5790,22 @@ class StaticImage( wx.Window ):
             HG.client_controller.gui.RegisterAnimationUpdateWindow( self )
             
         
-        self._dirty = True
+        self._SetDirty()
         
-        self.Refresh()
+    
+    def SetNoneMedia( self ):
+        
+        self._media = None
+        self._image_renderer = None
+        self._is_rendered = False
+        self._first_background_drawn = False
         
     
     def TIMERAnimationUpdate( self ):
         
         try:
             
-            if self._image_renderer.IsReady():
+            if self._image_renderer is None or self._image_renderer.IsReady():
                 
                 self._SetDirty()
                 

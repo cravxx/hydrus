@@ -3364,7 +3364,7 @@ But if 2 is--and is also perhaps accompanied by many 'could not parse' errors--t
                 
                 if query_text in self._GetCurrentQueryTexts():
                     
-                    wx.MessageBox( 'You already have a query for "' + query_text + '"! This duplicate entry you just created will not be added.' )
+                    wx.MessageBox( 'You already have a query for "' + query_text + '", so nothing new has been added.' )
                     
                     return
                     
@@ -3698,7 +3698,7 @@ But if 2 is--and is also perhaps accompanied by many 'could not parse' errors--t
                 message += os.linesep * 2
                 message += os.linesep.join( already_existing_query_texts )
                 message += os.linesep * 2
-                message += 'Were already in the subscription. They will not be added.'
+                message += 'Were already in the subscription, so they need not be added.'
                 
                 if len( new_query_texts ) > 0:
                     
@@ -4905,7 +4905,7 @@ class EditTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         rows.append( ( 'fetch tags even if url recognised and file already in db: ', self._fetch_tags_even_if_url_recognised_and_file_already_in_db ) )
         rows.append( ( 'fetch tags even if hash recognised and file already in db: ', self._fetch_tags_even_if_hash_recognised_and_file_already_in_db ) )
-        rows.append( ( 'set blacklist: ', self._tag_filter_button ) )
+        rows.append( ( 'set file blacklist: ', self._tag_filter_button ) )
         
         gridbox = ClientGUICommon.WrapInGrid( downloader_options_panel, rows )
         

@@ -7,6 +7,7 @@ import collections
 import cv2
 from . import HydrusConstants as HC
 from . import HydrusData
+from . import HydrusGlobals as HG
 from . import HydrusPaths
 from . import HydrusSerialisable
 import numpy
@@ -33,7 +34,7 @@ text_size = 0.4
 
 def CreateTopImage( width, title, payload_description, text ):
     
-    text_extent_bmp = wx.Bitmap( 20, 20, 24 )
+    text_extent_bmp = HG.client_controller.bitmap_manager.GetBitmap( 20, 20, 24 )
     
     dc = wx.MemoryDC( text_extent_bmp )
     
@@ -78,7 +79,7 @@ def CreateTopImage( width, title, payload_description, text ):
     
     #
     
-    top_bmp = wx.Bitmap( width, top_height, 24 )
+    top_bmp = HG.client_controller.bitmap_manager.GetBitmap( width, top_height, 24 )
     
     dc = wx.MemoryDC( top_bmp )
     
@@ -129,7 +130,7 @@ def CreateTopImage( width, title, payload_description, text ):
     
     top_image_rgb = numpy.fromstring( data_bytes, dtype = 'uint8' ).reshape( ( top_height, width, 3 ) )
     
-    top_bmp.Destroy()
+    HG.client_controller.bitmap_manager.ReleaseBitmap( top_bmp )
     
     top_image = cv2.cvtColor( top_image_rgb, cv2.COLOR_RGB2GRAY )
     
@@ -267,27 +268,50 @@ def LoadFromPng( path ):
     
     try:
         
-        ( height, width ) = numpy_image.shape
+        try:
+            
+            ( height, width ) = numpy_image.shape
+            
+        except:
+            
+            raise Exception( 'The file did not appear to be monochrome!' )
+            
         
-        complete_data = numpy_image.tostring()
+        try:
+            
+            complete_data = numpy_image.tostring()
+            
+            top_height_header = complete_data[:2]
+            
+            ( top_height, ) = struct.unpack( '!H', top_height_header )
+            
+            payload_and_header_bytes = complete_data[ width * top_height : ]
+            
+        except:
+            
+            raise Exception( 'Header bytes were invalid!' )
+            
         
-        top_height_header = complete_data[:2]
-        
-        ( top_height, ) = struct.unpack( '!H', top_height_header )
-        
-        payload_and_header_bytes = complete_data[ width * top_height : ]
-        
-        payload_length_header = payload_and_header_bytes[:4]
-        
-        ( payload_bytes_length, ) = struct.unpack( '!I', payload_length_header )
-        
-        payload_bytes = payload_and_header_bytes[ 4 : 4 + payload_bytes_length ]
+        try:
+            
+            payload_length_header = payload_and_header_bytes[:4]
+            
+            ( payload_bytes_length, ) = struct.unpack( '!I', payload_length_header )
+            
+            payload_bytes = payload_and_header_bytes[ 4 : 4 + payload_bytes_length ]
+            
+        except:
+            
+            raise Exception( 'Payload bytes were invalid!' )
+            
         
     except Exception as e:
         
-        HydrusData.ShowException( e )
+        message = 'The image loaded, but it did not seem to be a hydrus serialised png! The error was: {}'.format( str( e ) )
+        message += os.linesep * 2
+        message += 'If you believe this is a legit non-resized, non-converted hydrus serialised png, please send it to hydrus_dev.'
         
-        raise Exception( 'The image loaded, but it did not seem to be a hydrus serialised png!' )
+        raise Exception( message )
         
     
     return payload_bytes

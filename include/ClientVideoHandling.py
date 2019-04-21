@@ -195,7 +195,7 @@ class GIFRenderer( object ):
                 
                 numpy_image = self._GetCurrentFrame()
                 
-                numpy_image = ClientImageHandling.EfficientlyResizeNumpyImage( numpy_image, self._target_resolution )
+                numpy_image = ClientImageHandling.ResizeNumpyImage( numpy_image, self._target_resolution )
                 
                 numpy_image = cv2.cvtColor( numpy_image, cv2.COLOR_BGR2RGB )
                 
@@ -222,7 +222,7 @@ class GIFRenderer( object ):
             
             numpy_image = self._GetCurrentFrame()
             
-            numpy_image = ClientImageHandling.EfficientlyResizeNumpyImage( numpy_image, self._target_resolution )
+            numpy_image = ClientImageHandling.ResizeNumpyImage( numpy_image, self._target_resolution )
             
         
         self._last_frame = numpy_image
@@ -260,5 +260,10 @@ class GIFRenderer( object ):
         while self._next_render_index < index: self._GetCurrentFrame()
         
         #self._cv_video.set( CV_CAP_PROP_POS_FRAMES, index )
+        
+    
+    def Stop( self ):
+        
+        pass
         
     

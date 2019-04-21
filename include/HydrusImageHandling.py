@@ -83,35 +83,6 @@ def Dequantize( pil_image ):
     
     return pil_image
     
-def EfficientlyResizePILImage( pil_image, target_resolution ):
-    
-    ( target_x, target_y ) = target_resolution
-    ( im_x, im_y ) = pil_image.size
-    
-    if target_x >= im_x and target_y >= im_y: return pil_image
-    
-    #if pil_image.mode == 'RGB': # low quality resize screws up alpha channel!
-    #    
-    #    if im_x > 2 * target_x and im_y > 2 * target_y: pil_image.thumbnail( ( 2 * target_x, 2 * target_y ), PILImage.NEAREST )
-    #    
-    
-    return pil_image.resize( ( target_x, target_y ), PILImage.ANTIALIAS )
-    
-def EfficientlyThumbnailPILImage( pil_image, target_resolution ):
-    
-    ( target_x, target_y ) = target_resolution
-    ( im_x, im_y ) = pil_image.size
-    
-    #if pil_image.mode == 'RGB': # low quality resize screws up alpha channel!
-    #    
-    #    if im_x > 2 * target_x or im_y > 2 * target_y: pil_image.thumbnail( ( 2 * target_x, 2 * target_y ), PILImage.NEAREST )
-    #    
-    
-    if im_x > target_x or im_y > target_y:
-        
-        pil_image.thumbnail( ( target_x, target_y ), PILImage.ANTIALIAS )
-        
-    
 def GeneratePILImage( path ):
     
     fp = open( path, 'rb' )
@@ -234,8 +205,14 @@ def GetGIFFrameDurations( path ):
     
     while True:
         
-        try: pil_image.seek( i )
-        except: break
+        try:
+            
+            pil_image.seek( i )
+            
+        except:
+            
+            break
+            
         
         if 'duration' not in pil_image.info:
             
@@ -277,6 +254,21 @@ def GetImageProperties( path, mime ):
     
     return ( ( width, height ), duration, num_frames )
     
+def GetPSDResolution( path ):
+    
+    with open( path, 'rb' ) as f:
+        
+        f.seek( 14 )
+        
+        height_bytes = f.read( 4 )
+        width_bytes = f.read( 4 )
+        
+    
+    height = struct.unpack( '>L', height_bytes )[0]
+    width = struct.unpack( '>L', width_bytes )[0]
+    
+    return ( width, height )
+    
 def GetResolutionAndNumFrames( path, mime ):
     
     pil_image = GeneratePILImage( path )
@@ -314,36 +306,40 @@ def GetResolutionAndNumFrames( path, mime ):
     
     return ( ( x, y ), num_frames )
     
-def GetThumbnailResolution( image_resolution, target_resolution ):
+def GetThumbnailResolution( image_resolution, bounding_resolution ):
     
-    ( im_x, im_y ) = image_resolution
-    ( target_x, target_y ) = target_resolution
+    ( im_width, im_height ) = image_resolution
+    ( bounding_width, bounding_height ) = bounding_resolution
     
-    if target_x >= im_x and target_y >= im_y:
+    if bounding_width >= im_width and bounding_height >= im_height:
         
-        return ( im_x, im_y )
-        
-    
-    x_ratio = im_x / target_x
-    y_ratio = im_y / target_y
-    
-    if x_ratio > y_ratio:
-        
-        target_y = im_y / x_ratio
-        
-    elif y_ratio > x_ratio:
-        
-        target_x = im_x / y_ratio
+        return ( im_width, im_height )
         
     
-    target_x = max( int( target_x ), 1 )
-    target_y = max( int( target_y ), 1 )
+    width_ratio = im_width / bounding_width
+    height_ratio = im_height / bounding_height
     
-    return ( target_x, target_y )
+    thumbnail_width = bounding_width
+    thumbnail_height = bounding_height
+    
+    if width_ratio > height_ratio:
+        
+        thumbnail_height = im_height / width_ratio
+        
+    elif height_ratio > width_ratio:
+        
+        thumbnail_width = im_width / height_ratio
+        
+    
+    thumbnail_width = max( int( thumbnail_width ), 1 )
+    thumbnail_height = max( int( thumbnail_height ), 1 )
+    
+    return ( thumbnail_width, thumbnail_height )
     
 def IsDecompressionBomb( path ):
     
-    PILImage.MAX_IMAGE_PIXELS = OLD_PIL_MAX_IMAGE_PIXELS
+    # I boosted this up x2 as a temp test
+    PILImage.MAX_IMAGE_PIXELS = OLD_PIL_MAX_IMAGE_PIXELS * 2
     
     warnings.simplefilter( 'error', PILImage.DecompressionBombWarning )
     
@@ -363,4 +359,11 @@ def IsDecompressionBomb( path ):
         
     
     return False
+    
+def ResizePILImage( pil_image, target_resolution ):
+    
+    ( target_x, target_y ) = target_resolution
+    ( im_x, im_y ) = pil_image.size
+    
+    return pil_image.resize( ( target_x, target_y ), PILImage.ANTIALIAS )
     

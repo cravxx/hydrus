@@ -419,6 +419,64 @@ def ConvertValueRangeToPrettyString( value, range ):
     
     return ToHumanInt( value ) + '/' + ToHumanInt( range )
     
+def ConvertValueRangeToScanbarTimestampsMS( value_ms, range_ms ):
+    
+    value_ms = int( round( value_ms ) )
+    
+    range_hours = range_ms // 3600000
+    value_hours = value_ms // 3600000
+    range_minutes = ( range_ms % 3600000 ) // 60000
+    value_minutes = ( value_ms % 3600000 ) // 60000
+    range_seconds = ( range_ms % 60000 ) // 1000
+    value_seconds = ( value_ms % 60000 ) // 1000
+    range_ms = range_ms % 1000
+    value_ms = value_ms % 1000
+    
+    if range_hours > 0:
+        
+        # 0:01:23.033/1:12:57.067
+        
+        time_phrase = '{}:{:0>2}:{:0>2}.{:0>3}'
+        
+        args = ( value_hours, value_minutes, value_seconds, value_ms, range_hours, range_minutes, range_seconds, range_ms )
+        
+    elif range_minutes > 0:
+        
+        # 01:23.033/12:57.067 or 0:23.033/1:57.067
+        
+        if range_minutes > 9:
+            
+            time_phrase = '{:0>2}:{:0>2}.{:0>3}'
+            
+        else:
+            
+            time_phrase = '{:0>1}:{:0>2}.{:0>3}'
+            
+        
+        args = ( value_minutes, value_seconds, value_ms, range_minutes, range_seconds, range_ms )
+        
+    else:
+        
+        # 23.033/57.067 or 3.033/7.067 or 0.033/0.067
+        
+        if range_seconds > 9:
+            
+            time_phrase = '{:0>2}.{:0>3}'
+            
+        else:
+            
+            time_phrase = '{:0>1}.{:0>3}'
+            
+        
+        args = ( value_seconds, value_ms, range_seconds, range_ms )
+        
+    
+    full_phrase = '{}/{}'.format( time_phrase, time_phrase )
+    
+    result = full_phrase.format( *args )
+    
+    return result
+    
 def DebugPrint( debug_info ):
     
     Print( debug_info )
@@ -555,6 +613,13 @@ def GetSubprocessEnv():
     
     if HC.RUNNING_FROM_FROZEN_BUILD:
         
+        if HG.subprocess_report_mode:
+            
+            env = os.environ.copy()
+            
+            ShowText( 'Your pyinstaller env is: {}'.format( env ) )
+            
+        
         # let's make a proper env for subprocess that doesn't have pyinstaller woo woo in it
         
         env = os.environ.copy()
@@ -650,6 +715,11 @@ def GetSubprocessKWArgs( hide_terminal = True, text = False ):
     if hide_terminal:
         
         sbp_kwargs[ 'startupinfo' ] = GetSubprocessHideTerminalStartupInfo()
+        
+    
+    if HG.subprocess_report_mode:
+        
+        message = 'KWargs are: {}'.format( sbp_kwargs )
         
     
     return sbp_kwargs
@@ -1336,11 +1406,12 @@ class Call( object ):
     
 class ContentUpdate( object ):
     
-    def __init__( self, data_type, action, row ):
+    def __init__( self, data_type, action, row, reason = None ):
         
         self._data_type = data_type
         self._action = action
         self._row = row
+        self._reason = reason
         
     
     def __eq__( self, other ):
@@ -1384,13 +1455,9 @@ class ContentUpdate( object ):
                 
                 hashes = { file_info_manager.hash }
                 
-            elif self._action in ( HC.CONTENT_UPDATE_ARCHIVE, HC.CONTENT_UPDATE_DELETE, HC.CONTENT_UPDATE_UNDELETE, HC.CONTENT_UPDATE_INBOX, HC.CONTENT_UPDATE_PEND, HC.CONTENT_UPDATE_RESCIND_PEND, HC.CONTENT_UPDATE_RESCIND_PETITION ):
+            else:
                 
                 hashes = self._row
-                
-            elif self._action == HC.CONTENT_UPDATE_PETITION:
-                
-                ( hashes, reason ) = self._row
                 
             
         elif self._data_type == HC.CONTENT_TYPE_DIRECTORIES:
@@ -1406,10 +1473,6 @@ class ContentUpdate( object ):
             if self._action == HC.CONTENT_UPDATE_ADVANCED:
                 
                 hashes = set()
-                
-            elif self._action == HC.CONTENT_UPDATE_PETITION:
-                
-                ( tag, hashes, reason ) = self._row
                 
             else:
                 
@@ -1449,6 +1512,18 @@ class ContentUpdate( object ):
             
         
         return hashes
+        
+    
+    def GetReason( self ):
+        
+        if self._reason is None:
+            
+            return 'No reason given.'
+            
+        else:
+            
+            return self._reason
+            
         
     
     def GetWeight( self ):

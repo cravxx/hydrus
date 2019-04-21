@@ -1,11 +1,11 @@
 import collections
 import gc
 from . import HydrusConstants as HC
-from . import HydrusDaemons
 from . import HydrusData
 from . import HydrusDB
 from . import HydrusExceptions
 from . import HydrusGlobals as HG
+from . import HydrusNATPunch
 from . import HydrusPaths
 from . import HydrusPubSub
 from . import HydrusThreading
@@ -18,22 +18,13 @@ import traceback
 
 class HydrusController( object ):
     
-    def __init__( self, db_dir, no_daemons, no_wal ):
+    def __init__( self, db_dir ):
         
         HG.controller = self
         
         self._name = 'hydrus'
         
         self.db_dir = db_dir
-        self._no_daemons = no_daemons
-        self._no_wal = no_wal
-        
-        self._no_wal_path = os.path.join( self.db_dir, 'no-wal' )
-        
-        if os.path.exists( self._no_wal_path ):
-            
-            self._no_wal = True
-            
         
         self.db = None
         
@@ -42,6 +33,7 @@ class HydrusController( object ):
         
         self._pubsub = HydrusPubSub.HydrusPubSub( self )
         self._daemons = []
+        self._daemon_jobs = {}
         self._caches = {}
         self._managers = {}
         
@@ -144,6 +136,11 @@ class HydrusController( object ):
             
         
     
+    def _GetUPnPServices( self ):
+        
+        return []
+        
+    
     def _InitDB( self ):
         
         raise NotImplementedError()
@@ -194,6 +191,13 @@ class HydrusController( object ):
         
     
     def _ShutdownDaemons( self ):
+        
+        for job in self._daemon_jobs.values():
+            
+            job.Cancel()
+            
+        
+        self._daemon_jobs = {}
         
         for daemon in self._daemons:
             
@@ -342,17 +346,14 @@ class HydrusController( object ):
         for cache in list(self._caches.values()): cache.Clear()
         
     
-    def CreateNoWALFile( self ):
-        
-        with open( self._no_wal_path, 'w', encoding = 'utf-8' ) as f:
-            
-            f.write( 'This file was created because the database failed to set WAL journalling. It will not reattempt WAL as long as this file exists.' )
-            
-        
-    
     def CurrentlyIdle( self ):
         
         return True
+        
+    
+    def CurrentlyPubSubbing( self ):
+        
+        return self._pubsub.WorkToDo() or self._pubsub.DoingWork()
         
     
     def DBCurrentlyDoingJob( self ):
@@ -490,14 +491,31 @@ class HydrusController( object ):
     
     def InitView( self ):
         
-        if not self._no_daemons:
-            
-            self._daemons.append( HydrusThreading.DAEMONBackgroundWorker( self, 'MaintainDB', HydrusDaemons.DAEMONMaintainDB, period = 300, init_wait = 60 ) )
-            
+        job = self.CallRepeating( 60.0, 300.0, self.MaintainDB )
         
-        self.CallRepeating( 10.0, 120.0, self.SleepCheck )
-        self.CallRepeating( 10.0, 60.0, self.MaintainMemoryFast )
-        self.CallRepeating( 10.0, 300.0, self.MaintainMemorySlow )
+        job.ShouldDelayOnWakeup( True )
+        
+        self._daemon_jobs[ 'maintain_db' ] = job
+        
+        job = self.CallRepeating( 10.0, 120.0, self.SleepCheck )
+        
+        self._daemon_jobs[ 'sleep_check' ] = job
+        
+        job = self.CallRepeating( 10.0, 60.0, self.MaintainMemoryFast )
+        
+        self._daemon_jobs[ 'maintain_memory_fast' ] = job
+        
+        job = self.CallRepeating( 10.0, 300.0, self.MaintainMemorySlow )
+        
+        self._daemon_jobs[ 'maintain_memory_slow' ] = job
+        
+        upnp_services = self._GetUPnPServices()
+        
+        self.services_upnp_manager = HydrusNATPunch.ServicesUPnPManager( upnp_services )
+        
+        job = self.CallRepeating( 10.0, 43200.0, self.services_upnp_manager.RefreshUPnP )
+        
+        self._daemon_jobs[ 'services_upnp' ] = job
         
     
     def IsFirstStart( self ):
@@ -529,6 +547,11 @@ class HydrusController( object ):
         
         sys.stdout.flush()
         sys.stderr.flush()
+        
+        gc.collect()
+        
+        #
+        del gc.garbage[:]
         
         gc.collect()
         
@@ -726,7 +749,7 @@ class HydrusController( object ):
                 
                 raise HydrusExceptions.ShutdownException( 'Application shutting down!' )
                 
-            elif not self._pubsub.WorkToDo() and not self._pubsub.DoingWork():
+            elif not self.CurrentlyPubSubbing():
                 
                 return
                 
@@ -734,6 +757,14 @@ class HydrusController( object ):
                 
                 time.sleep( 0.00001 )
                 
+            
+        
+    
+    def WakeDaemon( self, name ):
+        
+        if name in self._daemon_jobs:
+            
+            self._daemon_jobs[ name ].Wake()
             
         
     

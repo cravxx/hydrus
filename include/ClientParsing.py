@@ -253,7 +253,14 @@ def GetHashesFromParseResults( results ):
     
 def GetHTMLTagString( tag ):
     
-    all_strings = [ s for s in tag.strings if len( s ) > 0 ]
+    try:
+        
+        all_strings = [ s for s in tag.strings if len( s ) > 0 ]
+        
+    except:
+        
+        return ''
+        
     
     if len( all_strings ) == 0:
         
@@ -810,7 +817,7 @@ class ParseFormulaHTML( ParseFormula ):
         
         for tag_rule in self._tag_rules:
             
-            tags = tag_rule.GetNodes( tags )
+            tags = list( tag_rule.GetNodes( tags ) )
             
         
         return tags
@@ -830,7 +837,11 @@ class ParseFormulaHTML( ParseFormula ):
     
     def _GetRawTextFromTag( self, tag ):
         
-        if self._content_to_fetch == HTML_CONTENT_ATTRIBUTE:
+        if tag is None:
+            
+            result = None
+            
+        elif self._content_to_fetch == HTML_CONTENT_ATTRIBUTE:
             
             if tag.has_attr( self._attribute_to_fetch ):
                 
@@ -1851,6 +1862,19 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
             if 'url' in parsing_context:
                 
                 base_url = parsing_context[ 'url' ]
+                
+                def clean_url( u ):
+                    
+                    # clears up when a source field starts with gubbins for some reason. e.g.:
+                    # (jap characters).avi | ranken [pixiv] http:/www.pixiv.net/member_illust.php?illust_id=48114073&mode=medium
+                    # ->
+                    # http:/www.pixiv.net/member_illust.php?illust_id=48114073&mode=medium
+                    
+                    while re.search( '\shttp', u ) is not None:
+                        
+                        u = re.sub( '^.*\shttp', 'http', u )
+                        
+                    
                 
                 parsed_texts = [ urllib.parse.urljoin( base_url, parsed_text ) for parsed_text in parsed_texts ]
                 

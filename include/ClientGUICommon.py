@@ -101,6 +101,8 @@ def ApplyContentApplicationCommandToMedia( parent, command, media ):
                 
             
         
+        reason = None
+        
         if service_type == HC.LOCAL_TAG:
             
             tags = [ tag ]
@@ -109,7 +111,7 @@ def ApplyContentApplicationCommandToMedia( parent, command, media ):
                 
                 content_update_action = HC.CONTENT_UPDATE_ADD
                 
-                tag_parents_manager = HG.client_controller.GetManager( 'tag_parents' )
+                tag_parents_manager = HG.client_controller.tag_parents_manager
                 
                 parents = tag_parents_manager.GetParents( service_key, tag )
                 
@@ -140,7 +142,7 @@ def ApplyContentApplicationCommandToMedia( parent, command, media ):
                 
                 content_update_action = HC.CONTENT_UPDATE_PEND
                 
-                tag_parents_manager = HG.client_controller.GetManager( 'tag_parents' )
+                tag_parents_manager = HG.client_controller.tag_parents_manager
                 
                 parents = tag_parents_manager.GetParents( service_key, tag )
                 
@@ -166,7 +168,9 @@ def ApplyContentApplicationCommandToMedia( parent, command, media ):
                         
                         content_update_action = HC.CONTENT_UPDATE_PETITION
                         
-                        rows = [ ( dlg.GetValue(), tag, hashes ) ]
+                        reason = dlg.GetValue()
+                        
+                        rows = [ ( tag, hashes ) ]
                         
                     else:
                         
@@ -180,7 +184,7 @@ def ApplyContentApplicationCommandToMedia( parent, command, media ):
                 
             
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_update_action, row ) for row in rows ]
+        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_update_action, row, reason = reason ) for row in rows ]
         
     elif service_type in ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ):
         
@@ -718,6 +722,18 @@ class BetterCheckListBox( wx.CheckListBox ):
         return result
         
     
+    def SetCheckedData( self, datas ):
+        
+        for index in range( self.GetCount() ):
+            
+            data = self.GetClientData( index )
+            
+            check_it = data in datas
+            
+            self.Check( index, check_it )
+            
+        
+    
 class BetterChoice( wx.Choice ):
     
     def Append( self, display_string, client_data ):
@@ -964,11 +980,11 @@ class BufferedWindow( wx.Window ):
             
             ( x, y ) = kwargs[ 'size' ]
             
-            self._canvas_bmp = wx.Bitmap( x, y, 24 )
+            self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( x, y, 24 )
             
         else:
             
-            self._canvas_bmp = wx.Bitmap( 20, 20, 24 )
+            self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( 20, 20, 24 )
             
         
         self._dirty = True
@@ -1003,7 +1019,7 @@ class BufferedWindow( wx.Window ):
         
         if my_width != current_bmp_width or my_height != current_bmp_height:
             
-            self._canvas_bmp = wx.Bitmap( my_width, my_height, 24 )
+            self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, my_height, 24 )
             
             self._dirty = True
             
@@ -2006,18 +2022,6 @@ class ListBook( wx.Panel ):
         return key in self._keys_to_active_pages or key in self._keys_to_proto_pages
         
     
-    def RenamePage( self, key, new_name ):
-        
-        index = self._GetIndex( key )
-        
-        if index != wx.NOT_FOUND:
-            
-            self._list_box.SetString( index, new_name )
-            
-        
-        self._RecalcListBoxWidth()
-        
-    
     def Select( self, key ):
         
         index = self._GetIndex( key )
@@ -2511,7 +2515,7 @@ class RatingLike( wx.Window ):
         
         self._service_key = service_key
         
-        self._canvas_bmp = wx.Bitmap( 16, 16, 24 )
+        self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( 16, 16, 24 )
         
         self.Bind( wx.EVT_PAINT, self.EventPaint )
         self.Bind( wx.EVT_ERASE_BACKGROUND, self.EventEraseBackground )
@@ -2740,7 +2744,7 @@ class RatingNumerical( wx.Window ):
         
         my_width = ClientRatings.GetNumericalWidth( self._service_key )
         
-        self._canvas_bmp = wx.Bitmap( my_width, 16, 24 )
+        self._canvas_bmp = HG.client_controller.bitmap_manager.GetBitmap( my_width, 16, 24 )
         
         self.Bind( wx.EVT_PAINT, self.EventPaint )
         self.Bind( wx.EVT_ERASE_BACKGROUND, self.EventEraseBackground )

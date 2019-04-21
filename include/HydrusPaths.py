@@ -333,29 +333,15 @@ def GetTempPath( suffix = '', dir = None ):
     
 def HasSpaceForDBTransaction( db_dir, num_bytes ):
     
-    temp_dir = tempfile.gettempdir()
-    
-    temp_disk_free_space = GetFreeSpace( temp_dir )
-    
-    a = GetDevice( temp_dir )
-    b = GetDevice( db_dir )
-    
-    if GetDevice( temp_dir ) == GetDevice( db_dir ):
-        
-        space_needed = int( num_bytes * 2.2 )
-        
-        if temp_disk_free_space < space_needed:
-            
-            return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' on your db\'s partition, which I think also holds your temporary path, but you only seem to have ' + HydrusData.ToHumanBytes( temp_disk_free_space ) + '.' )
-            
-        
-    else:
+    if HG.no_db_temp_files:
         
         space_needed = int( num_bytes * 1.1 )
         
-        if temp_disk_free_space < space_needed:
+        approx_available_memory = psutil.virtual_memory().available * 4 / 5
+        
+        if approx_available_memory < num_bytes:
             
-            return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' on your temporary path\'s partition, which I think is ' + temp_dir + ', but you only seem to have ' + HydrusData.ToHumanBytes( temp_disk_free_space ) + '.' )
+            return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' available memory, since you are running in no_db_temp_files mode, but you only seem to have ' + HydrusData.ToHumanBytes( approx_available_memory ) + '.' )
             
         
         db_disk_free_space = GetFreeSpace( db_dir )
@@ -363,6 +349,40 @@ def HasSpaceForDBTransaction( db_dir, num_bytes ):
         if db_disk_free_space < space_needed:
             
             return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' on your db\'s partition, but you only seem to have ' + HydrusData.ToHumanBytes( db_disk_free_space ) + '.' )
+            
+        
+    else:
+        
+        temp_dir = tempfile.gettempdir()
+        
+        temp_disk_free_space = GetFreeSpace( temp_dir )
+        
+        temp_and_db_on_same_device = GetDevice( temp_dir ) == GetDevice( db_dir )
+        
+        if temp_and_db_on_same_device:
+            
+            space_needed = int( num_bytes * 2.2 )
+            
+            if temp_disk_free_space < space_needed:
+                
+                return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' on your db\'s partition, which I think also holds your temporary path, but you only seem to have ' + HydrusData.ToHumanBytes( temp_disk_free_space ) + '.' )
+                
+            
+        else:
+            
+            space_needed = int( num_bytes * 1.1 )
+            
+            if temp_disk_free_space < space_needed:
+                
+                return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' on your temporary path\'s partition, which I think is ' + temp_dir + ', but you only seem to have ' + HydrusData.ToHumanBytes( temp_disk_free_space ) + '.' )
+                
+            
+            db_disk_free_space = GetFreeSpace( db_dir )
+            
+            if db_disk_free_space < space_needed:
+                
+                return ( False, 'I believe you need about ' + HydrusData.ToHumanBytes( space_needed ) + ' on your db\'s partition, but you only seem to have ' + HydrusData.ToHumanBytes( db_disk_free_space ) + '.' )
+                
             
         
     
@@ -392,8 +412,6 @@ def LaunchDirectory( path ):
             sbp_kwargs = HydrusData.GetSubprocessKWArgs()
             
             process = subprocess.Popen( cmd, preexec_fn = os.setsid, **sbp_kwargs )
-            
-            process.wait()
             
             process.communicate()
             
@@ -436,9 +454,11 @@ def LaunchFile( path, launch_path = None ):
                 preexec_fn = os.setsid
                 
             
-            if HG.callto_report_mode:
+            if HG.subprocess_report_mode:
                 
                 message = 'Attempting to launch ' + path + ' using command ' + repr( cmd ) + '.'
+                
+                HydrusData.ShowText( message )
                 
             
             try:
@@ -447,13 +467,9 @@ def LaunchFile( path, launch_path = None ):
                 
                 process = subprocess.Popen( cmd, preexec_fn = preexec_fn, stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, **sbp_kwargs )
                 
-                process.wait()
-                
                 ( stdout, stderr ) = process.communicate()
                 
-                if HG.callto_report_mode:
-                    
-                    HydrusData.ShowText( message )
+                if HG.subprocess_report_mode:
                     
                     if stdout is None and stderr is None:
                         
@@ -493,7 +509,7 @@ def MakeSureDirectoryExists( path ):
         os.makedirs( path )
         
     
-def MakeFileWritable( path ):
+def MakeFileWritable( path, recursive = True ):
     
     if not os.path.exists( path ):
         
@@ -502,24 +518,48 @@ def MakeFileWritable( path ):
     
     try:
         
-        os.chmod( path, stat.S_IWRITE | stat.S_IREAD )
+        stat_result = os.stat( path )
         
-        if os.path.isdir( path ):
+        current_bits = stat_result.st_mode
+        
+        if HC.PLATFORM_WINDOWS:
+            
+            # this is actually the same value as S_IWUSR, but let's not try to second guess ourselves
+            desired_bit = stat.S_IWRITE
+            
+        else:
+            
+            desired_bit = stat.S_IWUSR
+            
+        
+        if not desired_bit & current_bits:
+            
+            os.chmod( path, current_bits | desired_bit )
+            
+        
+        if os.path.isdir( path ) and recursive:
             
             for ( root, dirnames, filenames ) in os.walk( path ):
+                
+                for dirname in dirnames:
+                    
+                    sub_path = os.path.join( root, dirname )
+                    
+                    MakeFileWritable( sub_path, recursive = False )
+                    
                 
                 for filename in filenames:
                     
                     sub_path = os.path.join( root, filename )
                     
-                    os.chmod( sub_path, stat.S_IWRITE | stat.S_IREAD )
+                    MakeFileWritable( sub_path )
                     
                 
             
         
     except Exception as e:
         
-        pass
+        HydrusData.Print( 'Wanted to add write permission to "{}", but had an error: {}'.format( path, str( e ) ) )
         
     
 def MergeFile( source, dest ):
@@ -754,8 +794,6 @@ def OpenFileLocation( path ):
         sbp_kwargs = HydrusData.GetSubprocessKWArgs( hide_terminal = False )
         
         process = subprocess.Popen( cmd, **sbp_kwargs )
-        
-        process.wait()
         
         process.communicate()
         

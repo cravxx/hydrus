@@ -22,6 +22,7 @@ from . import ClientMedia
 from . import ClientPaths
 from . import ClientSearch
 from . import ClientTags
+from . import ClientThreading
 import collections
 from . import HydrusExceptions
 from . import HydrusNetwork
@@ -85,6 +86,165 @@ def CopyMediaURLMatchURLs( medias, url_match ):
     
     HG.client_controller.pub( 'clipboard', 'text', urls_string )
     
+def DoOpenKnownURLFromShortcut( win, media ):
+    
+    urls = media.GetLocationsManager().GetURLs()
+    
+    matched_labels_and_urls = []
+    unmatched_urls = []
+    
+    if len( urls ) > 0:
+        
+        for url in urls:
+            
+            url_match = HG.client_controller.network_engine.domain_manager.GetURLMatch( url )
+            
+            if url_match is None:
+                
+                unmatched_urls.append( url )
+                
+            else:
+                
+                label = url_match.GetName() + ': ' + url
+                
+                matched_labels_and_urls.append( ( label, url ) )
+                
+            
+        
+        matched_labels_and_urls.sort()
+        unmatched_urls.sort()
+        
+    
+    if len( matched_labels_and_urls ) == 0:
+        
+        return
+        
+    elif len( matched_labels_and_urls ) == 1:
+        
+        url = matched_labels_and_urls[0][1]
+        
+    else:
+        
+        matched_labels_and_urls.extend( ( url, url ) for url in unmatched_urls )
+        
+        try:
+            
+            url = ClientGUIDialogsQuick.SelectFromList( win, 'Select which URL', matched_labels_and_urls, sort_tuples = False )
+            
+        except HydrusExceptions.CancelledException:
+            
+            return
+            
+        
+    
+    ClientPaths.LaunchURLInWebBrowser( url )
+    
+def OpenURLs( urls ):
+    
+    urls = list( urls )
+    
+    urls.sort()
+    
+    if len( urls ) > 1:
+        
+        message = 'Open the {} URLs in your web browser?'.format( len( urls ) )
+        
+        if len( urls ) > 10:
+            
+            message += ' This will take some time.'
+            
+        
+        with ClientGUIDialogs.DialogYesNo( HG.client_controller.gui, message ) as dlg:
+            
+            if dlg.ShowModal() != wx.ID_YES:
+                
+                return
+                
+            
+        
+    
+    def do_it( urls ):
+        
+        job_key = None
+        
+        num_urls = len( urls )
+        
+        if num_urls > 5:
+            
+            job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
+            
+            job_key.SetVariable( 'popup_title', 'Opening URLs' )
+            
+            HG.client_controller.pub( 'message', job_key )
+            
+        
+        try:
+            
+            for ( i, url ) in enumerate( urls ):
+                
+                if job_key is not None:
+                    
+                    ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                    
+                    if should_quit:
+                        
+                        return
+                        
+                    
+                    job_key.SetVariable( 'popup_text_1', HydrusData.ConvertValueRangeToPrettyString( i + 1, num_urls ) )
+                    job_key.SetVariable( 'popup_gauge_1', ( i + 1, num_urls ) )
+                    
+                
+                ClientPaths.LaunchURLInWebBrowser( url )
+                
+                time.sleep( 1 )
+                
+            
+        finally:
+            
+            if job_key is not None:
+                
+                job_key.Finish()
+                
+                job_key.Delete( 1 )
+                
+            
+        
+    
+    HG.client_controller.CallToThread( do_it, urls )
+    
+def OpenMediaURLs( medias ):
+    
+    urls = set()
+    
+    for media in medias:
+        
+        media_urls = media.GetLocationsManager().GetURLs()
+        
+        urls.update( media_urls )
+        
+    
+    OpenURLs( urls )
+    
+def OpenMediaURLMatchURLs( medias, url_match ):
+    
+    urls = set()
+    
+    for media in medias:
+        
+        media_urls = media.GetLocationsManager().GetURLs()
+        
+        for url in media_urls:
+            
+            if url_match.Matches( url ):
+                
+                urls.add( url )
+                
+            
+        
+    
+    OpenURLs( urls )
+    
 def AddFileViewingStatsMenu( menu, focus_media ):
     
     view_style = HG.client_controller.new_options.GetInteger( 'file_viewing_stats_menu_display' )
@@ -94,7 +254,7 @@ def AddFileViewingStatsMenu( menu, focus_media ):
         return
         
     
-    fvsm = focus_media.GetMediaResult().GetFileViewingStatsManager()
+    fvsm = focus_media.GetFileViewingStatsManager()
     
     if view_style == CC.FILE_VIEWING_STATS_MENU_DISPLAY_MEDIA_AND_PREVIEW_SUMMED:
         
@@ -164,8 +324,8 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
     
     # figure out which urls these selected files have
     
-    selected_media_url_matches_to_copy = set()
-    can_copy_selected_all_urls = False
+    selected_media_url_matches = set()
+    multiple_or_unmatching_selection_url_matches = False
     
     if selected_media is not None and len( selected_media ) > 1:
         
@@ -192,32 +352,31 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
                 
                 if url_match is None:
                     
-                    can_copy_selected_all_urls = True
+                    multiple_or_unmatching_selection_url_matches = True
                     
                 else:
                     
-                    selected_media_url_matches_to_copy.add( url_match )
+                    selected_media_url_matches.add( url_match )
                     
                 
             
         
-        if len( selected_media_url_matches_to_copy ) > 1:
+        if len( selected_media_url_matches ) > 1:
             
-            can_copy_selected_all_urls = True
+            multiple_or_unmatching_selection_url_matches = True
             
         
     
-    if len( focus_labels_and_urls ) > 0 or len( selected_media_url_matches_to_copy ) > 0 or can_copy_selected_all_urls:
+    if len( focus_labels_and_urls ) > 0 or len( selected_media_url_matches ) > 0 or multiple_or_unmatching_selection_url_matches:
         
         urls_menu = wx.Menu()
         
+        urls_visit_menu = wx.Menu()
         urls_copy_menu = wx.Menu()
         
         # copy each this file's urls (of a particular type)
         
         if len( focus_labels_and_urls ) > 0:
-            
-            urls_visit_menu = wx.Menu()
             
             for ( label, url ) in focus_labels_and_urls:
                 
@@ -225,22 +384,25 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
                 ClientGUIMenus.AppendMenuItem( win, urls_copy_menu, label, 'Copy this url to your clipboard.', HG.client_controller.pub, 'clipboard', 'text', url )
                 
             
-            ClientGUIMenus.AppendMenu( urls_menu, urls_visit_menu, 'open' )
-            
         
         # copy this file's urls
         
-        can_copy_all_recognised_urls = len( focus_matched_labels_and_urls ) > 1
-        can_copy_all_urls = len( focus_unmatched_urls ) > 0 and len( focus_labels_and_urls ) > 1 # if there are unmatched urls and more than one thing total
+        there_are_focus_url_matches_to_action = len( focus_matched_labels_and_urls ) > 1
+        multiple_or_unmatching_focus_url_matches = len( focus_unmatched_urls ) > 0 and len( focus_labels_and_urls ) > 1 # if there are unmatched urls and more than one thing total
         
-        if can_copy_all_recognised_urls or can_copy_all_urls:
+        if there_are_focus_url_matches_to_action or multiple_or_unmatching_focus_url_matches:
             
+            ClientGUIMenus.AppendSeparator( urls_visit_menu )
             ClientGUIMenus.AppendSeparator( urls_copy_menu )
             
         
-        if can_copy_all_recognised_urls:
+        if there_are_focus_url_matches_to_action:
             
             urls = [ url for ( label, url ) in focus_matched_labels_and_urls ]
+            
+            label = 'open this file\'s ' + HydrusData.ToHumanInt( len( urls ) ) + ' recognised urls in your web browser'
+            
+            ClientGUIMenus.AppendMenuItem( win, urls_visit_menu, label, 'Open these urls in your web browser.', OpenURLs, urls )
             
             urls_string = os.linesep.join( urls )
             
@@ -249,9 +411,13 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
             ClientGUIMenus.AppendMenuItem( win, urls_copy_menu, label, 'Copy these urls to your clipboard.', HG.client_controller.pub, 'clipboard', 'text', urls_string )
             
         
-        if can_copy_all_urls:
+        if multiple_or_unmatching_focus_url_matches:
             
             urls = [ url for ( label, url ) in focus_labels_and_urls ]
+            
+            label = 'open this file\'s ' + HydrusData.ToHumanInt( len( urls ) ) + ' urls in your web browser'
+            
+            ClientGUIMenus.AppendMenuItem( win, urls_visit_menu, label, 'Open these urls in your web browser.', OpenURLs, urls )
             
             urls_string = os.linesep.join( urls )
             
@@ -260,22 +426,27 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
             ClientGUIMenus.AppendMenuItem( win, urls_copy_menu, label, 'Copy this url to your clipboard.', HG.client_controller.pub, 'clipboard', 'text', urls_string )
             
         
-        # copy these files' urls (of a particular type)
+        # now by url match type
         
-        can_copy_selected_recognised_urls = len( selected_media_url_matches_to_copy ) > 0
+        there_are_selection_url_matches_to_action = len( selected_media_url_matches ) > 0
         
-        if can_copy_selected_recognised_urls or can_copy_selected_all_urls:
+        if there_are_selection_url_matches_to_action or multiple_or_unmatching_selection_url_matches:
             
+            ClientGUIMenus.AppendSeparator( urls_visit_menu )
             ClientGUIMenus.AppendSeparator( urls_copy_menu )
             
         
-        if can_copy_selected_recognised_urls:
+        if there_are_selection_url_matches_to_action:
             
-            selected_media_url_matches_to_copy = list( selected_media_url_matches_to_copy )
+            selected_media_url_matches = list( selected_media_url_matches )
             
-            selected_media_url_matches_to_copy.sort( key = lambda url_match: url_match.GetName() )
+            selected_media_url_matches.sort( key = lambda url_match: url_match.GetName() )
             
-            for url_match in selected_media_url_matches_to_copy:
+            for url_match in selected_media_url_matches:
+                
+                label = 'open files\' ' + url_match.GetName() + ' urls in your web browser'
+                
+                ClientGUIMenus.AppendMenuItem( win, urls_visit_menu, label, 'Open this url class in your web browser for all files.', OpenMediaURLMatchURLs, selected_media, url_match )
                 
                 label = 'copy files\' ' + url_match.GetName() + ' urls'
                 
@@ -283,7 +454,13 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
                 
             
         
-        if can_copy_selected_all_urls:
+        # now everything
+        
+        if multiple_or_unmatching_selection_url_matches:
+            
+            label = 'open all files\' urls'
+            
+            ClientGUIMenus.AppendMenuItem( win, urls_visit_menu, label, 'Open urls in your web browser for all files.', OpenMediaURLs, selected_media )
             
             label = 'copy all files\' urls'
             
@@ -292,6 +469,7 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
         
         #
         
+        ClientGUIMenus.AppendMenu( urls_menu, urls_visit_menu, 'open' )
         ClientGUIMenus.AppendMenu( urls_menu, urls_copy_menu, 'copy' )
         
         ClientGUIMenus.AppendMenu( menu, urls_menu, 'known urls' )
@@ -357,7 +535,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
     
     def __init__( self, parent, page_key, file_service_key, media_results ):
         
-        wx.ScrolledCanvas.__init__( self, parent, size = ( 0, 0 ), style = wx.BORDER_SUNKEN )
+        wx.ScrolledCanvas.__init__( self, parent, size = ( 20, 20 ), style = wx.BORDER_SUNKEN )
         ClientMedia.ListeningMediaList.__init__( self, file_service_key, media_results )
         
         self._UpdateBackgroundColour()
@@ -692,11 +870,13 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
                     
                     chunks_of_hashes = HydrusData.SplitListIntoChunks( hashes, 64 )
                     
-                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
+                    reason = 'Deleted from Media Page.'
+                    
+                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes, reason = reason ) for chunk_of_hashes in chunks_of_hashes ]
                     
                 else:
                     
-                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, ( hashes, 'admin' ) ) ]
+                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = 'admin' ) ]
                     
                 
                 HG.client_controller.CallToThread( process_in_thread, file_service_key, content_updates )
@@ -1289,23 +1469,23 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
     
     def _ManageURLs( self ):
         
-        if self._focussed_media is None:
+        if len( self._selected_media ) > 0:
             
-            return
+            num_files = self._GetNumSelected()
             
-        
-        title = 'manage known urls'
-        
-        with ClientGUITopLevelWindows.DialogManage( self, title ) as dlg:
+            title = 'manage urls for {} files'.format( num_files )
             
-            panel = ClientGUIScrolledPanelsManagement.ManageURLsPanel( dlg, self._focussed_media.GetDisplayMedia() )
+            with ClientGUITopLevelWindows.DialogManage( self, title ) as dlg:
+                
+                panel = ClientGUIScrolledPanelsManagement.ManageURLsPanel( dlg, self._selected_media )
+                
+                dlg.SetPanel( panel )
+                
+                dlg.ShowModal()
+                
             
-            dlg.SetPanel( panel )
+            self.SetFocus()
             
-            dlg.ShowModal()
-            
-        
-        self.SetFocus()
         
     
     def _ModifyUploaders( self, file_service_key ):
@@ -1394,6 +1574,14 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
             
         
     
+    def _OpenKnownURL( self ):
+        
+        if self._focussed_media is not None:
+            
+            DoOpenKnownURLFromShortcut( self, self._focussed_media )
+            
+        
+    
     def _PetitionFiles( self, remote_service_key ):
         
         hashes = self._GetSelectedHashes()
@@ -1419,7 +1607,9 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
                     
                     if dlg.ShowModal() == wx.ID_OK:
                         
-                        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, ( hashes, dlg.GetValue() ) )
+                        reason = dlg.GetValue()
+                        
+                        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = reason )
                         
                         service_keys_to_content_updates = { remote_service_key : ( content_update, ) }
                         
@@ -1431,7 +1621,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
                 
             elif service_type == HC.IPFS:
                 
-                content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, ( hashes, 'ipfs' ) )
+                content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = 'ipfs' )
                 
                 service_keys_to_content_updates = { remote_service_key : ( content_update, ) }
                 
@@ -1498,25 +1688,43 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
         self._RemoveMediaDirectly( singletons, collections )
         
     
-    def _ReparseFile( self ):
+    def _RegenerateFileData( self, job_type ):
         
         flat_media = self._GetSelectedFlatMedia()
         
         hashes = { media.GetHash() for media in flat_media }
         
-        if len( hashes ) > 0:
+        num_files = len( hashes )
+        
+        if num_files > 0:
             
-            text = 'This will reparse the ' + HydrusData.ToHumanInt( len( hashes ) ) + ' selected files\' metadata and regenerate their thumbnails.'
+            if job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_COMPLETE:
+                
+                text = 'This will reparse the {} selected files\' metadata and regenerate their thumbnails.'.format( HydrusData.ToHumanInt( num_files ) )
+                text += os.linesep * 2
+                text += 'If the files were imported before some more recent improvement in the parsing code (such as EXIF rotation or bad video resolution or duration or frame count calculation), this will update them.'
+                
+            elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL:
+                
+                text = 'This will force-regenerate the {} selected files\' thumbnails.'.format( HydrusData.ToHumanInt( num_files ) )
+                
+            elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL:
+                
+                text = 'This will regenerate the {} selected files\' thumbnails, but only if they are the wrong size.'.format( HydrusData.ToHumanInt( num_files ) )
+                
+            
             text += os.linesep * 2
-            text += 'If the files were imported before some recent improvement in the parsing code (such as EXIF rotation or bad video resolution or duration or frame count calculation), this will update them.'
-            text += os.linesep * 2
-            text += 'It may take some time to reparse the files.'
+            text += 'It may take some time to finish this job.'
             
             with ClientGUIDialogs.DialogYesNo( self, text ) as dlg:
                 
                 if dlg.ShowModal() == wx.ID_YES:
                     
-                    HG.client_controller.Write( 'reparse_files', hashes )
+                    self._SetFocussedMedia( None )
+                    
+                    time.sleep( 1 )
+                    
+                    HG.client_controller.Write( 'regenerate_file_data', job_type, hashes )
                     
                 
             
@@ -1659,6 +1867,8 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
     
     def _SetDuplicates( self, duplicate_type, media_pairs = None, duplicate_action_options = None, silent = False ):
         
+        yes_no_text = 'unknown duplicate action'
+        
         if duplicate_type is None or duplicate_type == HC.DUPLICATE_UNKNOWN:
             
             if duplicate_type is None:
@@ -1684,6 +1894,8 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
             
             yes_no_text = 'set all pair relationships to ' + HC.duplicate_type_string_lookup[ duplicate_type ] + ' (with custom duplicate action/merge options)'
             
+        
+        file_deletion_reason = 'Deleted from duplicate action on Media Page ({}).'.format( yes_no_text )
         
         if media_pairs is None:
             
@@ -1751,7 +1963,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
                     
                 else:
                     
-                    service_keys_to_content_updates = duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media )
+                    service_keys_to_content_updates = duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media, file_deletion_reason = file_deletion_reason )
                     
                 
                 pair_info.append( ( duplicate_type, first_hash, second_hash, service_keys_to_content_updates ) )
@@ -2127,6 +2339,10 @@ class MediaPanel( ClientMedia.ListeningMediaList, wx.ScrolledCanvas ):
                 
                 self._ManageNotes()
                 
+            elif action == 'open_known_url':
+                
+                self._OpenKnownURL()
+                
             elif action == 'archive_file':
                 
                 self._Archive()
@@ -2334,7 +2550,7 @@ class MediaPanelThumbnails( MediaPanel ):
         
         MediaPanel.__init__( self, parent, page_key, file_service_key, media_results )
         
-        self._last_client_size = ( 0, 0 )
+        self._last_client_size = ( 20, 20 )
         self._num_columns = 1
         
         self._drag_init_coordinates = None
@@ -2365,7 +2581,7 @@ class MediaPanelThumbnails( MediaPanel ):
         HG.client_controller.sub( self, 'MaintainPageCache', 'memory_maintenance_pulse' )
         HG.client_controller.sub( self, 'NewFileInfo', 'new_file_info' )
         HG.client_controller.sub( self, 'NewThumbnails', 'new_thumbnails' )
-        HG.client_controller.sub( self, 'ThumbnailsResized', 'thumbnail_resize' )
+        HG.client_controller.sub( self, 'ThumbnailsResized', 'redraw_all_thumbnails' )
         HG.client_controller.sub( self, 'RefreshAcceleratorTable', 'notify_new_options' )
         HG.client_controller.sub( self, 'WaterfallThumbnails', 'waterfall_thumbnails' )
         
@@ -2401,14 +2617,14 @@ class MediaPanelThumbnails( MediaPanel ):
         
         ( thumbnail_span_width, thumbnail_span_height ) = self._GetThumbnailSpanDimensions()
         
-        self._dirty_canvas_pages.append( wx.Bitmap( client_width, self._num_rows_per_canvas_page * thumbnail_span_height ) )
+        self._dirty_canvas_pages.append( HG.client_controller.bitmap_manager.GetBitmap( client_width, self._num_rows_per_canvas_page * thumbnail_span_height ) )
         
     
     def _DeleteAllDirtyPages( self ):
         
         for bmp in self._dirty_canvas_pages:
             
-            bmp.Destroy()
+            HG.client_controller.bitmap_manager.ReleaseBitmap( bmp )
             
         
         self._dirty_canvas_pages = []
@@ -2930,8 +3146,8 @@ class MediaPanelThumbnails( MediaPanel ):
             
             del self._thumbnails_being_faded_in[ hash ]
             
-            bmp.Destroy()
-            alpha_bmp.Destroy()
+            HG.client_controller.bitmap_manager.ReleaseBitmap( bmp )
+            HG.client_controller.bitmap_manager.ReleaseBitmap( alpha_bmp )
             
         
     
@@ -2996,15 +3212,15 @@ class MediaPanelThumbnails( MediaPanel ):
             
             ( delta_x, delta_y ) = ( x - old_x, y - old_y )
             
-            if abs( delta_x ) > 5 or abs( delta_y ) > 5:
+            if abs( delta_x ) > 10 or abs( delta_y ) > 10:
                 
                 media = self._GetSelectedFlatMedia( discriminant = CC.DISCRIMINANT_LOCAL )
                 
                 if len( media ) > 0:
                     
-                    cmd_down = event.CmdDown()
+                    alt_down = event.AltDown()
                     
-                    result = ClientDragDrop.DoFileExportDragDrop( self, self._page_key, media, cmd_down )
+                    result = ClientDragDrop.DoFileExportDragDrop( self, self._page_key, media, alt_down )
                     
                     if result not in ( wx.DragError, wx.DragNone ):
                         
@@ -3181,6 +3397,7 @@ class MediaPanelThumbnails( MediaPanel ):
             dc.DrawBitmap( background_bmp, client_x - background_bmp_width, client_y - background_bmp_height )
             
         '''
+        
         for page_index in page_indices_to_draw:
             
             if page_index not in self._clean_canvas_pages:
@@ -3326,6 +3543,7 @@ class MediaPanelThumbnails( MediaPanel ):
                 rescind_unpin_phrase = 'rescind unpin from'
                 
                 manage_tags_phrase = 'selected files\' tags'
+                manage_urls_phrase = 'selected files\' urls'
                 manage_ratings_phrase = 'selected files\' ratings'
                 
                 archive_phrase = 'archive selected'
@@ -3355,6 +3573,7 @@ class MediaPanelThumbnails( MediaPanel ):
                 rescind_unpin_phrase = 'rescind unpin from'
                 
                 manage_tags_phrase = 'file\'s tags'
+                manage_urls_phrase = 'file\'s urls'
                 manage_ratings_phrase = 'file\'s ratings'
                 
                 archive_phrase = 'archive'
@@ -3488,6 +3707,9 @@ class MediaPanelThumbnails( MediaPanel ):
                     
                     ClientGUIMenus.AppendMenuLabel( menu, line, line )
                     
+                
+            
+            if len( self._selected_media ) == 1:
                 
                 AddFileViewingStatsMenu( menu, self._focussed_media )
                 
@@ -3668,7 +3890,7 @@ class MediaPanelThumbnails( MediaPanel ):
                 ClientGUIMenus.AppendMenuItem( self, manage_menu, manage_ratings_phrase, 'Manage ratings for the selected files.', self._ManageRatings )
                 
             
-            ClientGUIMenus.AppendMenuItem( self, manage_menu, 'file\'s known urls', 'Manage urls for the focused file.', self._ManageURLs )
+            ClientGUIMenus.AppendMenuItem( self, manage_menu, manage_urls_phrase, 'Manage urls for the selected files.', self._ManageURLs )
             ClientGUIMenus.AppendMenuItem( self, manage_menu, 'file\'s notes', 'Manage notes for the focused file.', self._ManageNotes )
             
             ClientGUIMenus.AppendMenu( menu, manage_menu, 'manage' )
@@ -4033,7 +4255,13 @@ class MediaPanelThumbnails( MediaPanel ):
                 
                 ClientGUIMenus.AppendSeparator( menu )
                 
-                ClientGUIMenus.AppendMenuItem( self, menu, 'reparse files and regenerate thumbnails', 'Refresh this file\'s metadata and regenerate its thumbnails.', self._ReparseFile )
+                regen_menu = wx.Menu()
+                
+                ClientGUIMenus.AppendMenuItem( self, regen_menu, 'thumbnails, but only if wrong size', 'Regenerate the selected files\' thumbnails, but only if they are the wrong size.', self._RegenerateFileData, ClientFiles.REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL )
+                ClientGUIMenus.AppendMenuItem( self, regen_menu, 'thumbnails', 'Regenerate the selected files\'s thumbnails.', self._RegenerateFileData, ClientFiles.REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL )
+                ClientGUIMenus.AppendMenuItem( self, regen_menu, 'file metadata and thumbnails', 'Regenerated the selected files\' metadata and thumbnails.', self._RegenerateFileData, ClientFiles.REGENERATE_FILE_DATA_JOB_COMPLETE )
+                
+                ClientGUIMenus.AppendMenu( menu, regen_menu, 'regenerate' )
                 
             
         
@@ -4164,15 +4392,20 @@ class MediaPanelThumbnails( MediaPanel ):
         
         ( thumbnail_span_width, thumbnail_span_height ) = self._GetThumbnailSpanDimensions()
         
-        self._ReinitialisePageCacheIfNeeded()
-        
-        self._RecalculateVirtualSize()
-        
         thumbnail_scroll_rate = float( HG.client_controller.new_options.GetString( 'thumbnail_scroll_rate' ) )
         
         self.SetScrollRate( 0, int( round( thumbnail_span_height * thumbnail_scroll_rate ) ) )
         
+        self._thumbnails_being_faded_in = {}
+        self._hashes_faded = set()
+        
+        self._ReinitialisePageCacheIfNeeded()
+        
+        self._RecalculateVirtualSize()
+        
         self._DirtyAllPages()
+        
+        self.Refresh()
         
     
     def TIMERAnimationUpdate( self ):
@@ -4295,8 +4528,8 @@ class MediaPanelThumbnails( MediaPanel ):
                 
                 del self._thumbnails_being_faded_in[ hash ]
                 
-                original_bmp.Destroy()
-                alpha_bmp.Destroy()
+                HG.client_controller.bitmap_manager.ReleaseBitmap( original_bmp )
+                HG.client_controller.bitmap_manager.ReleaseBitmap( alpha_bmp )
                 
             
             if HydrusData.TimeHasPassedPrecise( loop_should_break_time ):
@@ -4378,7 +4611,7 @@ class Thumbnail( Selectable ):
         
         ( width, height ) = ClientData.AddPaddingToDimensions( HC.options[ 'thumbnail_dimensions' ], thumbnail_border * 2 )
         
-        bmp = wx.Bitmap( width, height, 24 )
+        bmp = HG.client_controller.bitmap_manager.GetBitmap( width, height, 24 )
         
         dc = wx.MemoryDC( bmp )
         
@@ -4449,7 +4682,7 @@ class Thumbnail( Selectable ):
         
         dc.DrawBitmap( wx_bmp, x_offset, y_offset )
         
-        wx_bmp.Destroy()
+        HG.client_controller.bitmap_manager.ReleaseBitmap( wx_bmp )
         
         new_options = HG.client_controller.new_options
         
@@ -4459,7 +4692,7 @@ class Thumbnail( Selectable ):
         
         if len( tags ) > 0:
             
-            siblings_manager = HG.client_controller.GetManager( 'tag_siblings' )
+            siblings_manager = HG.client_controller.tag_siblings_manager
             
             tags = siblings_manager.CollapseTags( CC.COMBINED_TAG_SERVICE_KEY, tags )
             

@@ -7,6 +7,10 @@ test_controller = None
 view_shutdown = False
 model_shutdown = False
 
+no_daemons = False
+no_wal = False
+no_db_temp_files = False
+
 import_folders_running = False
 export_folders_running = False
 subscriptions_running = False
@@ -18,6 +22,7 @@ file_report_mode = False
 media_load_report_mode = False
 gui_report_mode = False
 shortcut_report_mode = False
+subprocess_report_mode = False
 subscription_report_mode = False
 hover_window_report_mode = False
 menu_profile_mode = False

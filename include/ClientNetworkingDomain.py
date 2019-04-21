@@ -486,32 +486,6 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
         return ( api_url_match, api_url )
         
     
-    def _GetURLToFetchAndParser( self, url ):
-        
-        try:
-            
-            ( parser_url_match, parser_url ) = self._GetNormalisedAPIURLMatchAndURL( url )
-            
-        except HydrusExceptions.URLMatchException as e:
-            
-            raise HydrusExceptions.URLMatchException( 'Could not find a parser for ' + url + '!' + os.linesep * 2 + str( e ) )
-            
-        
-        url_match_key = parser_url_match.GetMatchKey()
-        
-        if url_match_key in self._url_match_keys_to_parser_keys:
-            
-            parser_key = self._url_match_keys_to_parser_keys[ url_match_key ]
-            
-            if parser_key is not None and parser_key in self._parser_keys_to_parsers:
-                
-                return ( parser_url, self._parser_keys_to_parsers[ parser_key ] )
-                
-            
-        
-        raise HydrusExceptions.URLMatchException( 'Could not find a parser for ' + parser_url_match.GetName() + ' URL Class!' )
-        
-    
     def _GetSerialisableInfo( self ):
         
         serialisable_gugs = self._gugs.GetSerialisableTuple()
@@ -557,6 +531,32 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
             
         
         return None
+        
+    
+    def _GetURLToFetchAndParser( self, url ):
+        
+        try:
+            
+            ( parser_url_match, parser_url ) = self._GetNormalisedAPIURLMatchAndURL( url )
+            
+        except HydrusExceptions.URLMatchException as e:
+            
+            raise HydrusExceptions.URLMatchException( 'Could not find a parser for ' + url + '!' + os.linesep * 2 + str( e ) )
+            
+        
+        url_match_key = parser_url_match.GetMatchKey()
+        
+        if url_match_key in self._url_match_keys_to_parser_keys:
+            
+            parser_key = self._url_match_keys_to_parser_keys[ url_match_key ]
+            
+            if parser_key is not None and parser_key in self._parser_keys_to_parsers:
+                
+                return ( parser_url, self._parser_keys_to_parsers[ parser_key ] )
+                
+            
+        
+        raise HydrusExceptions.URLMatchException( 'Could not find a parser for ' + parser_url_match.GetName() + ' URL Class!' )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
@@ -1383,7 +1383,15 @@ class NetworkDomainManager( HydrusSerialisable.SerialisableBase ):
                 
                 ( url_to_fetch, parser ) = result
                 
-                HydrusData.ShowText( 'URL to fetch and parser request: ' + url + ' -> ' + url_to_fetch + ': ' + parser.GetName() )
+                url_match = self._GetURLMatch( url )
+                
+                url_name = url_match.GetName()
+                
+                url_to_fetch_match = self._GetURLMatch( url_to_fetch )
+                
+                url_to_fetch_name = url_to_fetch_match.GetName()
+                
+                HydrusData.ShowText( 'request for URL to fetch and parser: {} ({}) -> {} ({}): {}'.format( url, url_name, url_to_fetch, url_to_fetch_name, parser.GetName() ) )
                 
             
             return result
@@ -2632,10 +2640,7 @@ class URLMatch( HydrusSerialisable.SerialisableBaseNamed ):
         
         # post/show/1326143
         
-        if len( path ) > 0:
-            
-            path = '/' + path
-            
+        path = '/' + path
         
         # /post/show/1326143
         

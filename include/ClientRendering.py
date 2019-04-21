@@ -94,8 +94,6 @@ class ImageRenderer( object ):
     
     def _Initialise( self ):
         
-        time.sleep( 0.00001 )
-        
         self._numpy_image = ClientImageHandling.GenerateNumpyImage( self._path, self._mime )
         
     
@@ -131,7 +129,7 @@ class ImageRenderer( object ):
             
         else:
             
-            wx_numpy_image = ClientImageHandling.ResizeNumpyImage( self._media.GetMime(), self._numpy_image, target_resolution )
+            wx_numpy_image = ClientImageHandling.ResizeNumpyImageForMediaViewer( self._media.GetMime(), self._numpy_image, target_resolution )
             
         
         ( wx_height, wx_width, wx_depth ) = wx_numpy_image.shape
@@ -140,11 +138,11 @@ class ImageRenderer( object ):
         
         if wx_depth == 3:
             
-            return wx.Bitmap.FromBuffer( wx_width, wx_height, wx_data )
+            return HG.client_controller.bitmap_manager.GetBitmapFromBuffer( wx_width, wx_height, 24, wx_data )
             
         else:
             
-            return wx.Bitmap.FromBufferRGBA( wx_width, wx_height, wx_data )
+            return HG.client_controller.bitmap_manager.GetBitmapFromBuffer( wx_width, wx_height, 32, wx_data )
             
         
     
@@ -207,6 +205,8 @@ class RasterContainerVideo( RasterContainer ):
         self._init_position = init_position
         
         self._initialised = False
+        
+        self._renderer = None
         
         self._frames = {}
         
@@ -303,6 +303,8 @@ class RasterContainerVideo( RasterContainer ):
         
         client_files_manager = HG.client_controller.client_files_manager
         
+        time.sleep( 0.00001 )
+        
         if self._media.GetMime() == HC.IMAGE_GIF:
             
             self._durations = HydrusImageHandling.GetGIFFrameDurations( self._path )
@@ -314,6 +316,9 @@ class RasterContainerVideo( RasterContainer ):
             self._renderer = HydrusVideoHandling.VideoRendererFFMPEG( self._path, mime, duration, num_frames_in_video, self._target_resolution )
             
         
+        # give ui a chance to draw a blank frame rather than hard-charge right into CPUland
+        time.sleep( 0.00001 )
+        
         self.GetReadyForFrame( self._init_position )
         
         with self._lock:
@@ -324,6 +329,15 @@ class RasterContainerVideo( RasterContainer ):
         while True:
             
             if self._stop or HG.view_shutdown:
+                
+                self._renderer.Stop()
+                
+                self._renderer = None
+                
+                with self._lock:
+                    
+                    self._frames = {}
+                    
                 
                 return
                 
@@ -415,12 +429,12 @@ class RasterContainerVideo( RasterContainer ):
                 
                 with self._lock:
                     
-                    we_have_the_ideal_next_frame = self._HasFrame( self._ideal_next_frame )
+                    work_still_to_do = self._last_index_rendered != self._buffer_end_index
                     
                 
-                if not we_have_the_ideal_next_frame: # there is work to do!
+                if work_still_to_do:
                     
-                    time.sleep( 0.00001 )
+                    time.sleep( 0.0001 )
                     
                 else:
                     
@@ -578,6 +592,18 @@ class RasterContainerVideo( RasterContainer ):
         return self._target_resolution
         
     
+    def GetTimestampMS( self, frame_index ):
+        
+        if self._media.GetMime() == HC.IMAGE_GIF:
+            
+            return sum( self._durations[ : frame_index ] )
+            
+        else:
+            
+            return self._average_frame_duration * frame_index
+            
+        
+    
     def GetTotalDuration( self ):
         
         if self._media.GetMime() == HC.IMAGE_GIF:
@@ -595,6 +621,14 @@ class RasterContainerVideo( RasterContainer ):
         with self._lock:
             
             return self._HasFrame( index )
+            
+        
+    
+    def CanHaveVariableFramerate( self ):
+        
+        with self._lock:
+            
+            return self._media.GetMime() == HC.IMAGE_GIF
             
         
     
@@ -680,14 +714,7 @@ class HydrusBitmap( object ):
         
         ( width, height ) = self._size
         
-        if self._depth == 3:
-            
-            return wx.Bitmap.FromBuffer( width, height, self._GetData() )
-            
-        elif self._depth == 4:
-            
-            return wx.Bitmap.FromBufferRGBA( width, height, self._GetData() )
-            
+        return HG.client_controller.bitmap_manager.GetBitmapFromBuffer( width, height, self._depth * 8, self._GetData() )
         
     
     def GetWxImage( self ):
@@ -700,11 +727,11 @@ class HydrusBitmap( object ):
             
         elif self._depth == 4:
             
-            bitmap = wx.Bitmap.FromBufferRGBA( width, height, self._GetData() )
+            bitmap = HG.client_controller.bitmap_manager.GetBitmapFromBuffer( width, height, 32, self._GetData() )
             
             image = bitmap.ConvertToImage()
             
-            bitmap.Destroy()
+            HG.client_controller.bitmap_manager.ReleaseBitmap( bitmap )
             
             return image
             

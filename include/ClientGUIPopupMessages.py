@@ -1119,6 +1119,11 @@ class PopupMessageDialogPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 continue
                 
             
+            if ClientGUICommon.IsWXAncestor( self, tlw, through_tlws = True ):
+                
+                continue
+                
+            
             from . import ClientGUI
             
             if isinstance( tlw, ClientGUI.FrameGUI ):
@@ -1217,7 +1222,7 @@ class PopupMessageDialogPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
                 if parent.IsModal(): # event sometimes fires after modal done
                     
-                    self.GetParent().DoOK()
+                    parent.DoOK()
                     
                 
             else:

@@ -107,7 +107,7 @@ def FilterTagsBySearchText( service_key, search_text, tags, search_siblings = Tr
     
     re_predicate = compile_re( search_text )
     
-    sibling_manager = HG.client_controller.GetManager( 'tag_siblings' )
+    sibling_manager = HG.client_controller.tag_siblings_manager
     
     result = []
     
@@ -164,18 +164,23 @@ def SortPredicates( predicates ):
     
     return predicates
 
+SEARCH_TYPE_AND = 0
+SEARCH_TYPE_OR = 1
+
 class FileSearchContext( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_FILE_SEARCH_CONTEXT
     SERIALISABLE_NAME = 'File Search Context'
-    SERIALISABLE_VERSION = 1
+    SERIALISABLE_VERSION = 3
     
-    def __init__( self, file_service_key = CC.COMBINED_FILE_SERVICE_KEY, tag_service_key = CC.COMBINED_TAG_SERVICE_KEY, include_current_tags = True, include_pending_tags = True, predicates = None ):
+    def __init__( self, file_service_key = CC.COMBINED_FILE_SERVICE_KEY, tag_service_key = CC.COMBINED_TAG_SERVICE_KEY, search_type = SEARCH_TYPE_AND, include_current_tags = True, include_pending_tags = True, predicates = None ):
         
         if predicates is None: predicates = []
         
         self._file_service_key = file_service_key
         self._tag_service_key = tag_service_key
+        
+        self._search_type = search_type
         
         self._include_current_tags = include_current_tags
         self._include_pending_tags = include_pending_tags
@@ -191,12 +196,12 @@ class FileSearchContext( HydrusSerialisable.SerialisableBase ):
         
         serialisable_predicates = [ predicate.GetSerialisableTuple() for predicate in self._predicates ]
         
-        return ( self._file_service_key.hex(), self._tag_service_key.hex(), self._include_current_tags, self._include_pending_tags, serialisable_predicates, self._search_complete )
+        return ( self._file_service_key.hex(), self._tag_service_key.hex(), self._search_type, self._include_current_tags, self._include_pending_tags, serialisable_predicates, self._search_complete )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
-        ( file_service_key, tag_service_key, self._include_current_tags, self._include_pending_tags, serialisable_predicates, self._search_complete ) = serialisable_info
+        ( file_service_key, tag_service_key, self._search_type, self._include_current_tags, self._include_pending_tags, serialisable_predicates, self._search_complete ) = serialisable_info
         
         self._file_service_key = bytes.fromhex( file_service_key )
         self._tag_service_key = bytes.fromhex( tag_service_key )
@@ -250,7 +255,7 @@ class FileSearchContext( HydrusSerialisable.SerialisableBase ):
             else: self._namespaces_to_exclude.append( namespace )
             
         
-        wildcard_predicates =  [ predicate for predicate in self._predicates if predicate.GetType() == HC.PREDICATE_TYPE_WILDCARD ]
+        wildcard_predicates = [ predicate for predicate in self._predicates if predicate.GetType() == HC.PREDICATE_TYPE_WILDCARD ]
         
         self._wildcards_to_include = []
         self._wildcards_to_exclude = []
@@ -263,10 +268,41 @@ class FileSearchContext( HydrusSerialisable.SerialisableBase ):
             else: self._wildcards_to_exclude.append( wildcard )
             
         
+        self._or_predicates = [ predicate for predicate in self._predicates if predicate.GetType() == HC.PREDICATE_TYPE_OR_CONTAINER ]
+        
+    
+    def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
+        
+        if version == 1:
+            
+            ( file_service_key_hex, tag_service_key_hex, include_current_tags, include_pending_tags, serialisable_predicates, search_complete ) = old_serialisable_info
+            
+            search_type = SEARCH_TYPE_AND
+            
+            new_serialisable_info = ( file_service_key_hex, tag_service_key_hex, search_type, include_current_tags, include_pending_tags, serialisable_predicates, search_complete )
+            
+            return ( 2, new_serialisable_info )
+            
+        
+        if version == 2:
+            
+            ( file_service_key_hex, tag_service_key_hex, search_type, include_current_tags, include_pending_tags, serialisable_predicates, search_complete ) = old_serialisable_info
+            
+            # screwed up the serialisation code for the previous update, so these were getting swapped
+            
+            search_type = SEARCH_TYPE_AND
+            include_current_tags = True
+            
+            new_serialisable_info = ( file_service_key_hex, tag_service_key_hex, search_type, include_current_tags, include_pending_tags, serialisable_predicates, search_complete )
+            
+            return ( 3, new_serialisable_info )
+            
+        
     
     def GetFileServiceKey( self ): return self._file_service_key
     def GetNamespacesToExclude( self ): return self._namespaces_to_exclude
     def GetNamespacesToInclude( self ): return self._namespaces_to_include
+    def GetORPredicates( self ): return self._or_predicates
     def GetPredicates( self ): return self._predicates
     def GetSystemPredicates( self ): return self._system_predicates
     def GetTagServiceKey( self ): return self._tag_service_key
@@ -447,7 +483,10 @@ class FileSystemPredicates( object ):
                 elif operator == '=': self._common_info[ 'duration' ] = duration
                 elif operator == '\u2248':
                     
-                    if duration == 0: self._common_info[ 'duration' ] = 0
+                    if duration == 0:
+                        
+                        self._common_info[ 'duration' ] = 0
+                        
                     else:
                         
                         self._common_info[ 'min_duration' ] = int( duration * 0.85 )
@@ -688,7 +727,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
     
     def __init__( self, predicate_type = None, value = None, inclusive = True, min_current_count = 0, min_pending_count = 0, max_current_count = None, max_pending_count = None ):
         
-        if isinstance( value, list ):
+        if isinstance( value, ( list, set ) ):
             
             value = tuple( value )
             
@@ -759,6 +798,12 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             serialisable_value = ( hash.hex(), hash_type )
             
+        elif self._predicate_type == HC.PREDICATE_TYPE_OR_CONTAINER:
+            
+            or_predicates = self._value
+            
+            serialisable_value = HydrusSerialisable.SerialisableList( or_predicates ).GetSerialisableTuple()
+            
         else:
             
             serialisable_value = self._value
@@ -815,6 +860,12 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             ( view_type, viewing_locations, operator, viewing_value ) = serialisable_value
             
             self._value = ( view_type, tuple( viewing_locations ), operator, viewing_value )
+            
+        elif self._predicate_type == HC.PREDICATE_TYPE_OR_CONTAINER:
+            
+            serialisable_or_predicates = serialisable_value
+            
+            self._value = tuple( HydrusSerialisable.CreateFromSerialisableTuple( serialisable_or_predicates ) )
             
         else:
             
@@ -905,6 +956,10 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             return namespace
             
+        else:
+            
+            return ''
+            
         
     
     def GetInclusive( self ):
@@ -959,6 +1014,34 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def GetTextsAndNamespaces( self, or_under_construction = False ):
+        
+        if self._predicate_type == HC.PREDICATE_TYPE_OR_CONTAINER:
+            
+            texts_and_namespaces = []
+            
+            if or_under_construction:
+                
+                texts_and_namespaces.append( ( 'OR: ', 'system' ) )
+                
+            
+            for or_predicate in self._value:
+                
+                texts_and_namespaces.append( ( or_predicate.ToString(), or_predicate.GetNamespace() ) )
+                
+                texts_and_namespaces.append( ( ' OR ', 'system' ) )
+                
+            
+            texts_and_namespaces = texts_and_namespaces[ : -1 ]
+            
+        else:
+            
+            texts_and_namespaces = [ ( self.ToString(), self.GetNamespace() ) ]
+            
+        
+        return texts_and_namespaces
+        
+    
     def GetType( self ):
         
         return self._predicate_type
@@ -969,7 +1052,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         return self._inclusive
         
     
-    def ToString( self, with_count = True, sibling_service_key = None, render_for_user = False ):
+    def ToString( self, with_count = True, sibling_service_key = None, render_for_user = False, or_under_construction = False ):
         
         count_text = ''
         
@@ -1430,7 +1513,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             if sibling_service_key is not None:
                 
-                siblings_manager = HG.client_controller.GetManager( 'tag_siblings' )
+                siblings_manager = HG.client_controller.tag_siblings_manager
                 
                 sibling = siblings_manager.GetSibling( sibling_service_key, tag )
                 
@@ -1480,6 +1563,19 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             base += wildcard
             
+        elif self._predicate_type == HC.PREDICATE_TYPE_OR_CONTAINER:
+            
+            or_predicates = self._value
+            
+            base = ''
+            
+            if or_under_construction:
+                
+                base += 'OR: '
+                
+            
+            base += ' OR '.join( ( or_predicate.ToString( render_for_user = render_for_user ) for or_predicate in or_predicates ) )
+            
         
         return base
         
@@ -1496,7 +1592,10 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         return self.GetCopy()
         
     
-    def GetValue( self ): return self._value
+    def GetValue( self ):
+        
+        return self._value
+        
     
     def HasNonZeroCount( self ):
         

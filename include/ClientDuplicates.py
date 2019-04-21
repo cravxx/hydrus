@@ -139,7 +139,12 @@ class DuplicateActionOptions( HydrusSerialisable.SerialisableBase ):
         return ( self._tag_service_actions, self._rating_service_actions, self._delete_second_file, self._sync_archive, self._delete_both_files, self._sync_urls_action )
         
     
-    def ProcessPairIntoContentUpdates( self, first_media, second_media ):
+    def ProcessPairIntoContentUpdates( self, first_media, second_media, file_deletion_reason = None ):
+        
+        if file_deletion_reason is None:
+            
+            file_deletion_reason = 'unknown reason'
+            
         
         service_keys_to_content_updates = collections.defaultdict( list )
         
@@ -208,6 +213,19 @@ class DuplicateActionOptions( HydrusSerialisable.SerialisableBase ):
                 
             
         
+        def worth_updating_rating( source_rating, dest_rating ):
+            
+            if source_rating is not None:
+                
+                if dest_rating is None or source_rating > dest_rating:
+                    
+                    return True
+                    
+                
+            
+            return False
+            
+        
         for ( service_key, action ) in self._rating_service_actions:
             
             content_updates = []
@@ -226,28 +244,18 @@ class DuplicateActionOptions( HydrusSerialisable.SerialisableBase ):
             
             if action == HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE:
                 
-                if first_current_value == second_current_value:
-                    
-                    continue
-                    
-                
-                if first_current_value is None and second_current_value is not None:
-                    
-                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
-                    
-                elif first_current_value is not None and second_current_value is None:
+                if worth_updating_rating( first_current_value, second_current_value ):
                     
                     content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( first_current_value, second_hashes ) ) )
+                    
+                elif worth_updating_rating( second_current_value, first_current_value ):
+                    
+                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
                     
                 
             elif action == HC.CONTENT_MERGE_ACTION_COPY:
                 
-                if first_current_value == second_current_value:
-                    
-                    continue
-                    
-                
-                if first_current_value is None and second_current_value is not None:
+                if worth_updating_rating( second_current_value, first_current_value ):
                     
                     content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
                     
@@ -256,7 +264,7 @@ class DuplicateActionOptions( HydrusSerialisable.SerialisableBase ):
                 
                 if second_current_value is not None:
                     
-                    if first_current_value is None:
+                    if worth_updating_rating( second_current_value, first_current_value ):
                         
                         content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
                         
@@ -339,6 +347,12 @@ class DuplicateActionOptions( HydrusSerialisable.SerialisableBase ):
                 
                 deletee_media.append( first_media )
                 
+                file_deletion_reason += ': both files deleted'
+                
+            else:
+                
+                file_deletion_reason += ': \'worse\' file deleted'
+                
             
             deletee_media.append( second_media )
             
@@ -362,7 +376,7 @@ class DuplicateActionOptions( HydrusSerialisable.SerialisableBase ):
             
             if deletee_service_key is not None:
                 
-                content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, media.GetHashes() )
+                content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, media.GetHashes(), reason = file_deletion_reason )
                 
                 service_keys_to_content_updates[ deletee_service_key ].append( content_update )
                 

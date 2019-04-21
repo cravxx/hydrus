@@ -279,9 +279,9 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         add_remove_hbox = wx.BoxSizer( wx.HORIZONTAL )
         
-        add_remove_hbox.Add( self._add_button, CC.FLAGS_LONE_BUTTON )
-        add_remove_hbox.Add( self._edit_button, CC.FLAGS_LONE_BUTTON )
-        add_remove_hbox.Add( self._delete_button, CC.FLAGS_LONE_BUTTON )
+        add_remove_hbox.Add( self._add_button, CC.FLAGS_VCENTER )
+        add_remove_hbox.Add( self._edit_button, CC.FLAGS_VCENTER )
+        add_remove_hbox.Add( self._delete_button, CC.FLAGS_VCENTER )
         
         vbox = wx.BoxSizer( wx.VERTICAL )
         
@@ -800,8 +800,8 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 hbox = wx.BoxSizer( wx.HORIZONTAL )
                 
-                hbox.Add( self._register, CC.FLAGS_LONE_BUTTON )
-                hbox.Add( self._test_credentials_button, CC.FLAGS_LONE_BUTTON )
+                hbox.Add( self._register, CC.FLAGS_VCENTER )
+                hbox.Add( self._test_credentials_button, CC.FLAGS_VCENTER )
                 
                 wrapped_access_key = ClientGUICommon.WrapInText( self._access_key, self, 'access key: ' )
                 
@@ -854,9 +854,9 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                             
                             network_bytes = network_job.GetContentBytes()
                             
-                            hydrus_args = HydrusNetwork.ParseNetworkBytesToHydrusArgs( network_bytes )
+                            parsed_request_args = HydrusNetwork.ParseNetworkBytesToParsedHydrusArgs( network_bytes )
                             
-                            access_key_encoded = hydrus_args[ 'access_key' ].hex()
+                            access_key_encoded = parsed_request_args[ 'access_key' ].hex()
                             
                             wx.CallAfter( wx_setkey, access_key_encoded )
                             
@@ -1047,43 +1047,58 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 ClientGUICommon.StaticBox.__init__( self, parent, 'client api' )
                 
-                self._booru_options_panel = ClientGUICommon.StaticBox( self, 'options' )
+                self._client_server_options_panel = ClientGUICommon.StaticBox( self, 'options' )
                 
                 if service_type == HC.LOCAL_BOORU:
                     
                     name = 'local booru'
+                    default_port = 45868
                     
                 elif service_type == HC.CLIENT_API_SERVICE:
                     
                     name = 'client api'
+                    default_port = 45869
                     
                 
                 port_name = '{} local port'.format( name )
                 none_phrase = 'do not run {} service'.format( name )
                 
-                self._port = ClientGUICommon.NoneableSpinCtrl( self._booru_options_panel, port_name, none_phrase = none_phrase, min = 1, max = 65535 )
+                self._port = ClientGUICommon.NoneableSpinCtrl( self._client_server_options_panel, port_name, none_phrase = none_phrase, min = 1, max = 65535 )
                 
-                self._allow_non_local_connections = wx.CheckBox( self._booru_options_panel, label = 'allow non-local connections' )
+                self._allow_non_local_connections = wx.CheckBox( self._client_server_options_panel, label = 'allow non-local connections' )
                 
-                self._upnp = ClientGUICommon.NoneableSpinCtrl( self._booru_options_panel, 'upnp port', none_phrase = 'do not forward port', max = 65535 )
+                self._support_cors = wx.CheckBox( self._client_server_options_panel, label = 'support CORS headers' )
+                self._support_cors.SetToolTip( 'Have this server support Cross-Origin Resource Sharing, which allows web browsers to access it off other domains. Turn this on if you want to access this service through a web-based wrapper (e.g. a booru wrapper) hosted on another domain.' )
                 
-                self._bandwidth_rules = ClientGUIControls.BandwidthRulesCtrl( self._booru_options_panel, dictionary[ 'bandwidth_rules' ] )
+                self._log_requests = wx.CheckBox( self._client_server_options_panel, label = 'log requests' )
+                self._log_requests.SetToolTip( 'Hydrus server services will write a brief anonymous line to the log for every request made, but for the client services this tends to be a bit spammy. You probably want this off unless you are testing something.' )
+                
+                self._upnp = ClientGUICommon.NoneableSpinCtrl( self._client_server_options_panel, 'upnp port', none_phrase = 'do not forward port', max = 65535 )
+                
+                self._bandwidth_rules = ClientGUIControls.BandwidthRulesCtrl( self._client_server_options_panel, dictionary[ 'bandwidth_rules' ] )
                 
                 #
+                
+                self._port.SetValue( default_port )
+                self._upnp.SetValue( default_port )
                 
                 self._port.SetValue( dictionary[ 'port' ] )
                 self._upnp.SetValue( dictionary[ 'upnp_port' ] )
                 
                 self._allow_non_local_connections.SetValue( dictionary[ 'allow_non_local_connections' ] )
+                self._support_cors.SetValue( dictionary[ 'support_cors' ] )
+                self._log_requests.SetValue( dictionary[ 'log_requests' ] )
                 
                 #
                 
-                self._booru_options_panel.Add( self._port, CC.FLAGS_EXPAND_PERPENDICULAR )
-                self._booru_options_panel.Add( self._allow_non_local_connections, CC.FLAGS_EXPAND_PERPENDICULAR )
-                self._booru_options_panel.Add( self._upnp, CC.FLAGS_EXPAND_PERPENDICULAR )
-                self._booru_options_panel.Add( self._bandwidth_rules, CC.FLAGS_EXPAND_BOTH_WAYS )
+                self._client_server_options_panel.Add( self._port, CC.FLAGS_EXPAND_PERPENDICULAR )
+                self._client_server_options_panel.Add( self._allow_non_local_connections, CC.FLAGS_EXPAND_PERPENDICULAR )
+                self._client_server_options_panel.Add( self._support_cors, CC.FLAGS_EXPAND_PERPENDICULAR )
+                self._client_server_options_panel.Add( self._log_requests, CC.FLAGS_EXPAND_PERPENDICULAR )
+                self._client_server_options_panel.Add( self._upnp, CC.FLAGS_EXPAND_PERPENDICULAR )
+                self._client_server_options_panel.Add( self._bandwidth_rules, CC.FLAGS_EXPAND_BOTH_WAYS )
                 
-                self.Add( self._booru_options_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+                self.Add( self._client_server_options_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
                 
                 self._allow_non_local_connections.Bind( wx.EVT_CHECKBOX, self.EventCheckBox )
                 
@@ -1092,7 +1107,7 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 if self._allow_non_local_connections.GetValue():
                     
-                    self._upnp.Setvalue( None )
+                    self._upnp.SetValue( None )
                     
                     self._upnp.Disable()
                     
@@ -1114,6 +1129,8 @@ class ManageClientServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
                 dictionary_part[ 'port' ] = self._port.GetValue()
                 dictionary_part[ 'upnp_port' ] = self._upnp.GetValue()
                 dictionary_part[ 'allow_non_local_connections' ] = self._allow_non_local_connections.GetValue()
+                dictionary_part[ 'support_cors' ] = self._support_cors.GetValue()
+                dictionary_part[ 'log_requests' ] = self._log_requests.GetValue()
                 dictionary_part[ 'bandwidth_rules' ] = self._bandwidth_rules.GetValue()
                 
                 return dictionary_part
@@ -1380,7 +1397,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         self._listbook.AddPage( 'maintenance and processing', 'maintenance and processing', self._MaintenanceAndProcessingPanel( self._listbook ) )
         self._listbook.AddPage( 'media', 'media', self._MediaPanel( self._listbook ) )
         #self._listbook.AddPage( 'sound', 'sound', self._SoundPanel( self._listbook ) )
-        self._listbook.AddPage( 'default file system predicates', 'default file system predicates', self._DefaultFileSystemPredicatesPanel( self._listbook, self._new_options ) )
+        self._listbook.AddPage( 'default system predicates', 'default system predicates', self._DefaultFileSystemPredicatesPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'colours', 'colours', self._ColoursPanel( self._listbook ) )
         self._listbook.AddPage( 'regex favourites', 'regex favourites', self._RegexPanel( self._listbook ) )
         self._listbook.AddPage( 'sort/collect', 'sort/collect', self._SortCollectPanel( self._listbook ) )
@@ -2144,7 +2161,11 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options = new_options
             
-            self._filter_inbox_and_archive_predicates = wx.CheckBox( self, label = 'hide inbox and archive predicates if either has no files' )
+            self._always_show_system_everything = wx.CheckBox( self, label = 'show system:everything even if total files is over 10,000' )
+            
+            self._always_show_system_everything.SetValue( self._new_options.GetBoolean( 'always_show_system_everything' ) )
+            
+            self._filter_inbox_and_archive_predicates = wx.CheckBox( self, label = 'hide inbox and archive system predicates if either has no files' )
             
             self._filter_inbox_and_archive_predicates.SetValue( self._new_options.GetBoolean( 'filter_inbox_and_archive_predicates' ) )
             
@@ -2165,6 +2186,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             vbox = wx.BoxSizer( wx.VERTICAL )
             
+            vbox.Add( self._always_show_system_everything, CC.FLAGS_VCENTER )
             vbox.Add( self._filter_inbox_and_archive_predicates, CC.FLAGS_VCENTER )
             vbox.Add( ( 20, 20 ), CC.FLAGS_EXPAND_PERPENDICULAR )
             vbox.Add( self._file_system_predicate_age, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -2185,6 +2207,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         def UpdateOptions( self ):
             
+            self._new_options.SetBoolean( 'always_show_system_everything', self._always_show_system_everything.GetValue() )
             self._new_options.SetBoolean( 'filter_inbox_and_archive_predicates', self._filter_inbox_and_archive_predicates.GetValue() )
             
             system_predicates = HC.options[ 'file_system_predicates' ]
@@ -2215,6 +2238,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options = HG.client_controller.new_options
             
             self._export_location = wx.DirPickerCtrl( self, style = wx.DIRP_USE_TEXTCTRL )
+            
+            self._file_system_waits_on_wakeup = wx.CheckBox( self, label = '' )
+            self._file_system_waits_on_wakeup.SetToolTip( 'This is useful if your hydrus is stored on a NAS that takes a few seconds to get going after your machine resumes from sleep.' )
             
             self._delete_to_recycle_bin = wx.CheckBox( self, label = '' )
             
@@ -2248,6 +2274,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                     self._export_location.SetPath( abs_path )
                     
                 
+            
+            self._file_system_waits_on_wakeup.SetValue( self._new_options.GetBoolean( 'file_system_waits_on_wakeup' ) )
             
             self._delete_to_recycle_bin.SetValue( HC.options[ 'delete_to_recycle_bin' ] )
             
@@ -2295,6 +2323,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows.append( ( 'Confirm sending files to trash: ', self._confirm_trash ) )
             rows.append( ( 'Confirm sending more than one file to archive or inbox: ', self._confirm_archive ) )
+            rows.append( ( 'Wait 15s after computer resume before accessing files: ', self._file_system_waits_on_wakeup ) )
             rows.append( ( 'When deleting files or folders, send them to the OS\'s recycle bin: ', self._delete_to_recycle_bin ) )
             rows.append( ( 'Remove files from view when they are filtered: ', self._remove_filtered_files ) )
             rows.append( ( 'Remove files from view when they are sent to the trash: ', self._remove_trashed_files ) )
@@ -2401,6 +2430,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             HC.options[ 'export_path' ] = HydrusPaths.ConvertAbsPathToPortablePath( self._export_location.GetPath() )
             
+            self._new_options.SetBoolean( 'file_system_waits_on_wakeup', self._file_system_waits_on_wakeup.GetValue() )
+            
             HC.options[ 'delete_to_recycle_bin' ] = self._delete_to_recycle_bin.GetValue()
             HC.options[ 'confirm_trash' ] = self._confirm_trash.GetValue()
             HC.options[ 'confirm_archive' ] = self._confirm_archive.GetValue()
@@ -2466,6 +2497,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._discord_dnd_fix = wx.CheckBox( self )
             self._discord_dnd_fix.SetToolTip( 'This makes small file drag-and-drops a little laggier in exchange for discord support.' )
             
+            self._secret_discord_dnd_fix = wx.CheckBox( self )
+            self._secret_discord_dnd_fix.SetToolTip( 'This saves the lag but is potentially dangerous, as it (may) treat the from-db-files-drag as a move rather than a copy and hence only works when the drop destination will not consume the files. It requires an additional secret Alternate key to unlock.' )
+            
             self._always_show_hover_windows = wx.CheckBox( self )
             self._always_show_hover_windows.SetToolTip( 'If your window manager doesn\'t like showing the hover windows on mouse-over (typically on some Linux flavours), please try this out and give the dev feedback on this forced size and position accuracy!' )
             
@@ -2502,6 +2536,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._discord_dnd_fix.SetValue( self._new_options.GetBoolean( 'discord_dnd_fix' ) )
             
+            self._secret_discord_dnd_fix.SetValue( self._new_options.GetBoolean( 'secret_discord_dnd_fix' ) )
+            
             self._always_show_hover_windows.SetValue( self._new_options.GetBoolean( 'always_show_hover_windows' ) )
             
             self._hide_message_manager_on_gui_iconise.SetValue( self._new_options.GetBoolean( 'hide_message_manager_on_gui_iconise' ) )
@@ -2529,7 +2565,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'Hide the preview window: ', self._hide_preview ) )
             rows.append( ( 'Approximate max width of popup messages (in characters): ', self._popup_message_character_width ) )
             rows.append( ( 'BUGFIX: Force this width as the minimum width for all popup messages: ', self._popup_message_force_min_width ) )
-            rows.append( ( 'BUGFIX: Discord file drag-and-drop fix (works for <=10, <50MB file DnDs): ', self._discord_dnd_fix ) )
+            rows.append( ( 'BUGFIX: Discord file drag-and-drop fix (works for <=25, <200MB file DnDs): ', self._discord_dnd_fix ) )
+            rows.append( ( 'EXPERIMENTAL BUGFIX: Secret discord file drag-and-drop fix: ', self._secret_discord_dnd_fix ) )
             rows.append( ( 'BUGFIX: Always show media viewer hover windows: ', self._always_show_hover_windows ) )
             rows.append( ( 'BUGFIX: Hide the popup message manager when the main gui is minimised: ', self._hide_message_manager_on_gui_iconise ) )
             rows.append( ( 'BUGFIX: Hide the popup message manager when the main gui loses focus: ', self._hide_message_manager_on_gui_deactive ) )
@@ -2615,6 +2652,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             HG.client_controller.pub( 'main_gui_title', title )
             
             self._new_options.SetBoolean( 'discord_dnd_fix', self._discord_dnd_fix.GetValue() )
+            self._new_options.SetBoolean( 'secret_discord_dnd_fix', self._secret_discord_dnd_fix.GetValue() )
             self._new_options.SetBoolean( 'always_show_hover_windows', self._always_show_hover_windows.GetValue() )
             self._new_options.SetBoolean( 'hide_message_manager_on_gui_iconise', self._hide_message_manager_on_gui_iconise.GetValue() )
             self._new_options.SetBoolean( 'hide_message_manager_on_gui_deactive', self._hide_message_manager_on_gui_deactive.GetValue() )
@@ -2822,7 +2860,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._media_zooms.SetValue( ','.join( ( str( media_zoom ) for media_zoom in media_zooms ) ) )
             
-            mimes_in_correct_order = ( HC.IMAGE_JPEG, HC.IMAGE_PNG, HC.IMAGE_APNG, HC.IMAGE_GIF, HC.APPLICATION_FLASH, HC.APPLICATION_PDF, HC.APPLICATION_ZIP, HC.APPLICATION_RAR, HC.APPLICATION_7Z, HC.APPLICATION_HYDRUS_UPDATE_CONTENT, HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS, HC.VIDEO_AVI, HC.VIDEO_FLV, HC.VIDEO_MOV, HC.VIDEO_MP4, HC.VIDEO_MKV, HC.VIDEO_MPEG, HC.VIDEO_WEBM, HC.VIDEO_WMV, HC.AUDIO_MP3, HC.AUDIO_OGG, HC.AUDIO_FLAC, HC.AUDIO_WMA )
+            mimes_in_correct_order = ( HC.IMAGE_JPEG, HC.IMAGE_PNG, HC.IMAGE_APNG, HC.IMAGE_GIF, HC.IMAGE_WEBP, HC.IMAGE_TIFF, HC.APPLICATION_FLASH, HC.APPLICATION_PDF, HC.APPLICATION_PSD, HC.APPLICATION_ZIP, HC.APPLICATION_RAR, HC.APPLICATION_7Z, HC.APPLICATION_HYDRUS_UPDATE_CONTENT, HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS, HC.VIDEO_AVI, HC.VIDEO_FLV, HC.VIDEO_MOV, HC.VIDEO_MP4, HC.VIDEO_MKV, HC.VIDEO_MPEG, HC.VIDEO_WEBM, HC.VIDEO_WMV, HC.AUDIO_MP3, HC.AUDIO_OGG, HC.AUDIO_FLAC, HC.AUDIO_WMA )
             
             for mime in mimes_in_correct_order:
                 
@@ -4032,8 +4070,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options = new_options
             
-            self._thumbnail_width = wx.SpinCtrl( self, min = 20, max = 200 )
-            self._thumbnail_height = wx.SpinCtrl( self, min = 20, max = 200 )
+            self._thumbnail_width = wx.SpinCtrl( self, min = 20, max = 2048 )
+            self._thumbnail_height = wx.SpinCtrl( self, min = 20, max = 2048 )
             
             self._thumbnail_border = wx.SpinCtrl( self, min = 0, max = 20 )
             self._thumbnail_margin = wx.SpinCtrl( self, min = 0, max = 20 )
@@ -5281,10 +5319,21 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         ClientGUIScrolledPanels.ManagePanel.__init__( self, parent )
         
-        self._media = media
+        media = ClientMedia.FlattenMedia( media )
         
-        self._urls_listbox = wx.ListBox( self, style = wx.LB_SORT | wx.LB_SINGLE )
+        self._current_media = [ m.Duplicate() for m in media ]
+        
+        self._multiple_files_warning = ClientGUICommon.BetterStaticText( self, label = 'Warning: you are editing urls for multiple files!\nBe very careful about adding URLs here, as they will apply to everything.\nAdding the same URL to multiple files is only appropriate for gallery-type URLs!' )
+        self._multiple_files_warning.SetForegroundColour( ( 128, 0, 0 ) )
+        
+        if len( self._current_media ) == 1:
+            
+            self._multiple_files_warning.Hide()
+            
+        
+        self._urls_listbox = wx.ListBox( self, style = wx.LB_SORT | wx.LB_EXTENDED )
         self._urls_listbox.Bind( wx.EVT_LISTBOX_DCLICK, self.EventListDoubleClick )
+        self._urls_listbox.Bind( wx.EVT_KEY_DOWN, self.EventListKeyDown )
         
         ( width, height ) = ClientGUICommon.ConvertTextToPixels( self._urls_listbox, ( 120, 10 ) )
         
@@ -5301,16 +5350,11 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         #
         
-        locations_manager = self._media.GetLocationsManager()
+        self._pending_content_updates = []
         
-        self._original_urls = set( locations_manager.GetURLs() )
+        self._current_urls_count = collections.Counter()
         
-        for url in self._original_urls:
-            
-            self._urls_listbox.Append( url, url )
-            
-        
-        self._current_urls = set( self._original_urls )
+        self._UpdateList()
         
         #
         
@@ -5321,6 +5365,7 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         vbox = wx.BoxSizer( wx.VERTICAL )
         
+        vbox.Add( self._multiple_files_warning, CC.FLAGS_EXPAND_PERPENDICULAR )
         vbox.Add( self._urls_listbox, CC.FLAGS_EXPAND_BOTH_WAYS )
         vbox.Add( self._url_input, CC.FLAGS_EXPAND_PERPENDICULAR )
         vbox.Add( hbox, CC.FLAGS_BUTTON_SIZER )
@@ -5334,7 +5379,7 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
     
     def _Copy( self ):
         
-        urls = list( self._current_urls )
+        urls = list( self._current_urls_count.keys() )
         
         urls.sort()
         
@@ -5347,42 +5392,35 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         normalised_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
         
-        for u in ( url, normalised_url ):
+        addee_media = set()
+        
+        for m in self._current_media:
             
-            if u in self._current_urls:
+            locations_manager = m.GetLocationsManager()
+            
+            if normalised_url not in locations_manager.GetURLs():
                 
-                if only_add:
-                    
-                    return
-                    
-                
-                for index in range( self._urls_listbox.GetCount() ):
-                    
-                    existing_url = self._urls_listbox.GetClientData( index )
-                    
-                    if existing_url == u:
-                        
-                        self._RemoveURL( index )
-                        
-                        return
-                        
-                    
+                addee_media.add( m )
                 
             
         
-        u = normalised_url
+        if len( addee_media ) > 0:
+            
+            addee_hashes = { m.GetHash() for m in addee_media }
+            
+            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( ( url, ), addee_hashes ) )
+            
+            for m in addee_media:
+                
+                m.GetMediaResult().ProcessContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
+                
+            
+            self._pending_content_updates.append( content_update )
+            
         
-        if u not in self._current_urls:
-            
-            self._urls_listbox.Append( u, u )
-            
-            self._current_urls.add( u )
-            
-            if u not in self._original_urls:
-                
-                self._urls_to_add.add( u )
-                
-            
+        #
+        
+        self._UpdateList()
         
     
     def _Paste( self ):
@@ -5405,20 +5443,37 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
         
     
-    def _RemoveURL( self, index ):
+    def _RemoveURL( self, url ):
         
-        url = self._urls_listbox.GetClientData( index )
+        removee_media = set()
         
-        self._urls_listbox.Delete( index )
-        
-        self._current_urls.discard( url )
-        
-        self._urls_to_add.discard( url )
-        
-        if url in self._original_urls:
+        for m in self._current_media:
             
-            self._urls_to_remove.add( url )
+            locations_manager = m.GetLocationsManager()
             
+            if url in locations_manager.GetURLs():
+                
+                removee_media.add( m )
+                
+            
+        
+        if len( removee_media ) > 0:
+            
+            removee_hashes = { m.GetHash() for m in removee_media }
+            
+            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( ( url, ), removee_hashes ) )
+            
+            for m in removee_media:
+                
+                m.GetMediaResult().ProcessContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
+                
+            
+            self._pending_content_updates.append( content_update )
+            
+        
+        #
+        
+        self._UpdateList()
         
     
     def _SetSearchFocus( self ):
@@ -5426,17 +5481,70 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
         self._url_input.SetFocus()
         
     
+    def _UpdateList( self ):
+        
+        self._urls_listbox.Clear()
+        
+        self._current_urls_count = collections.Counter()
+        
+        for m in self._current_media:
+            
+            locations_manager = m.GetLocationsManager()
+            
+            for url in locations_manager.GetURLs():
+                
+                self._current_urls_count[ url ] += 1
+                
+            
+        
+        for ( url, count ) in self._current_urls_count.items():
+            
+            if len( self._current_media ) == 1:
+                
+                label = url
+                
+            else:
+                
+                label = '{} ({})'.format( url, count )
+                
+            
+            self._urls_listbox.Append( label, url )
+            
+        
+    
     def EventListDoubleClick( self, event ):
         
-        selection = self._urls_listbox.GetSelection()
+        urls = [ self._urls_listbox.GetClientData( selection ) for selection in list( self._urls_listbox.GetSelections() ) ]
         
-        if selection != wx.NOT_FOUND:
+        for url in urls:
             
-            url = self._urls_listbox.GetClientData( selection )
+            self._RemoveURL( url )
             
-            self._RemoveURL( selection )
+        
+        if len( urls ) == 1:
+            
+            url = urls[0]
             
             self._url_input.SetValue( url )
+            
+        
+    
+    def EventListKeyDown( self, event ):
+        
+        ( modifier, key ) = ClientGUIShortcuts.ConvertKeyEventToSimpleTuple( event )
+        
+        if key in CC.DELETE_KEYS:
+            
+            urls = [ self._urls_listbox.GetClientData( selection ) for selection in list( self._urls_listbox.GetSelections() ) ]
+            
+            for url in urls:
+                
+                self._RemoveURL( url )
+                
+            
+        else:
+            
+            event.Skip()
             
         
     
@@ -5476,23 +5584,9 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
     
     def CommitChanges( self ):
         
-        hash = self._media.GetHash()
-        
-        content_updates = []
-        
-        if len( self._urls_to_add ) > 0:
+        if len( self._pending_content_updates ) > 0:
             
-            content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( self._urls_to_add, ( hash, ) ) ) )
-            
-        
-        if len( self._urls_to_remove ) > 0:
-            
-            content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( self._urls_to_remove, ( hash, ) ) ) )
-            
-        
-        if len( content_updates ) > 0:
-            
-            service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : content_updates }
+            service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : self._pending_content_updates }
             
             HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
             

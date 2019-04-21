@@ -8,6 +8,329 @@
 		<div class="content">
 			<h3>changelog</h3>
 			<ul>
+				<li><h3>version 348</h3></li>
+				<ul>
+					<li>wrote some OR search help to 'getting started with tags' help page</li>
+					<li>wrote a new multi-reader, single-writer lock object for the client file manager, along with some unit tests for it.</li>
+					<li>updated the file and thumbnail access and regen and maintenance code to use the new lock. various access is now faster when available and overall safer. there is still work to do here</li>
+					<li>adjusted file import to be less aggressive about locking, which should reduce some file/thumbnail access lag during heavy imports</li>
+					<li>the thumbnail space estimate in the migrate database dialog is now more adaptive to the new more flexible thumbnail size system and specificies better that it is an estimate</li>
+					<li>the client api's /add_tags/add_tags call now collapses siblings and expands parents on an add/pend call. this can be turned off by setting the new optional parameter 'add_siblings_and_parents' to false. the help is updated regarding this and the client api version is incremented to 6</li>
+					<li>fixed the client api's /add_tags/add_tags call for the 'hashes' parameter, which was failing to parse, and added an accidentally missing unit test to check this in future</li>
+					<li>the client local services (the booru and client api) now have two new options under their 'manage services' panel: 'support CORS', which turns on cross-orogin support (which is experimental for now, so defaults to False), and 'logs requests', which controls whether your log will be spammed with request reports (this also defaults to False), which should clear up some 100MB+ log hassle for people using the Hydrus Companion browser add-on</li>
+					<li>hydrus services now respond correctly (albeit sparsely) to OPTIONS requests, and if CORS is enabled, to CORS OPTIONS requests. there are unit tests for this that seem to work ok, but I think we'll need to verify it irl</li>
+					<li>finished a first version bitmap manager to handle all wx bitmap creation and destruction, including recycling mid-steps</li>
+					<li>updated all simple wx bitmap creation and destruction calls across the client to use the new bitmap manager, improving stability and saving some CPU</li>
+					<li>fixed some incorrect button alignment flags that were causing problems for clients set to assert check these values</li>
+					<li>added a new yiff.party file url class to the defaults that matches a new file attachment format</li>
+					<li>updated the 'url' content parser so if a parsed url is in the form 'summary_text url', as some booru source fields sometimes specify, the preceding summary text is removed, cleaning up the resultant url</li>
+					<li>silenced an old server connection lost error that was needlessly loud</li>
+					<li>silenced the client network engine from additionally log-printing SizeException errors when a downloading file (usually gif) exceeds file import options rules</li>
+					<li>improved misc window destruction code</li>
+					<li>updated supported mime list in 'getting started with files' help and website index</li>
+					<li>misc cleanup</li>
+				</ul>
+				<li><h3>version 347</h3></li>
+				<ul>
+					<li>or search:</li>
+					<li>under construction OR predicates now present at the top of the regular tag results list, prepended with 'OR: ', and skipping default selection</li>
+					<li>this new OR line is enter-able, which will present it as-is, rather than adding new preds</li>
+					<li>hitting escape on a 'search' tag input box that is empty but has an under construction or predicate will cancel the or pred</li>
+					<li>hitting escape on a 'search' tag input box otherwise should more reliably kill its focus when the dropdown is a float window</li>
+					<li>improved OR search efficiency significantly with dynamic OR search triggering based on other search predicates. OR searches including negated '-tag' components should be massively faster when paired with non-OR tag or file search predicates</li>
+					<li>I believe I fixed a search issue that would sometimes return insufficient results when OR preds are mixed with certain other combinations of tags</li>
+					<li>improved reliability of some thumbnail refresh calls</li>
+					<li>cleaned up a bunch of OR handling ui code</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>after previous weeks' experiments, wrote new double-layer thumbnail loading system--now too-small thumbs will quckly scale up fuzzily straight to screen, and then in the coming seconds, the nice regenerated full-size thumb will be made and drawn in place as ready. it presents much faster and looks better, but there is some cleanup to do here that I will tackle next week</li>
+					<li>all local file trashing events now record a context-appropriate deletion statement such as "Deleted from Media Viewer." this value is recovered in 'deleted' import status 'notes'. You will mostly see 'Unknown deletion reason.', for files deleted before this new system, but it will populate with appropriate info over time</li>
+					<li>fixed a search optimisation that was not cross-referencing with file domain, meaning for instance that bare system:rating calls were returning since-deleted files</li>
+					<li>upnp management window now uses new listctrl</li>
+					<li>cleaned up some old custom page-naming code</li>
+					<li>added a 'data' debug call to clear out all cached thumbnails and force an instant ui thumb reload</li>
+					<li>fixed the trash bmp misalignment, ha ha</li>
+					<li>removed e-hentai login script from the defaults, since this testing script is not appropriate for new users</li>
+					<li>dejanked some media viewer video transitions by cleaning up animation bar rendering and smoothing out video buffer initialisation</li>
+					<li>cleaned out some surplus subprocess wait calls that were hanging some systems on various 'open externally' calls</li>
+					<li>fixed multiple syncing problems with 'synchronise' export folders that produce files with subdirectories. subdirectory structures should now be synced correctly and empty folders deleted</li>
+					<li>export folders that collapse multiple file results to the same duplicated name should, after the next run, do less overwriting to this same name</li>
+					<li>if an export folder or the regular export dialog makes a file destination path that is above the chosen directory (e.g. if the path starts with ../ or ..\), the export job will error out with an explanation</li>
+					<li>big manual file exports _should_ be politer to the ui and cause fewer hangs</li>
+					<li>doing page tab drag and drops may have less post-drop ui jank on linux, continued feedback would be appreciated</li>
+					<li>moved 'reason' handling for all content updates to its own area, which neatens many content update data handling issues</li>
+					<li>fixed petitioning a tag via a shortcut, which had bad reason handling</li>
+					<li>fixed an issue with committing pending ipfs items that was overchecking service permissions</li>
+					<li>fixed some remaining bad wx code in the unit tests</li>
+					<li>misc file status reporting cleanup</li>
+				</ul>
+				<li><h3>version 346</h3></li>
+				<ul>
+					<li>or search:</li>
+					<li>extended the search predicate object to handle more OR stuff</li>
+					<li>extended the tag list to handle list objects that have multiple colours</li>
+					<li>extended the new OR search predicate to report multiple text-snippet-and-colour pairs based on sub-predicates</li>
+					<li>extended tag search input to handle prototype OR predicate creation--hold shift when you enter the tag, and it'll start an OR chain. shift-enter continues the chain, enter alone completes it</li>
+					<li>fleshed out the predicate unit tests to cover more of this</li>
+					<li>wrote unit tests for OR search predicates. it seems good!</li>
+					<li>improved some search logic to apply system preds better in certain edge cases and spend less CPU on OR-search-only searches</li>
+					<li>.</li>
+					<li>thumbnails:</li>
+					<li>thumbnails will now queue for load in a more intelligent order based on estimated difficulty to regenerate, which will tend to put more thumbs on screen faster</li>
+					<li>the decision to regenerate a thumbnail from source is now tempered by how different the current thumbnail is from what is desired--the more similar the two sizes, the more (randomly) likely the client will decide to just use the current (resized) this time. this smooths out change-lag while limiting the number of really fuzzy thumbs you get. feedback on how this works IRL would be appreciated--it uses some voodoo distribution polling to figure it out, which I can definitely tweak</li>
+					<li>improved visual quality of thumbnail scale-up optimisations</li>
+					<li>fixed an issue where a multipage thumbnail grid would incorrectly recalculate the new virtual height after a thumbnail size change event, leading to a bit of invalid extra scrollspace (with noclip rendering errors) at the bottom</li>
+					<li>the thumbnail right-click menu's reparse files entry is now extended to a new 'regenerate' submenu with three options: reparse file and regen thumbs (the old action), force regen thumbs, and regen thumbs if wrong size!</li>
+					<li>the new 'regen if thumbs wrong size' action sends how many thumbs needed resize up to the popup window, as well</li>
+					<li>moved some old thumbnail regen code responsibility out of the db and into the files manager</li>
+					<li>cleaned out some old redundant file/thumbnail code</li>
+					<li>cleaned and refactored a bunch of general image handling and resizing code</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>fixed some bad serialisation code that was making file search objects set their 'include current tags' value to false/true on interleaving loads. on this update, all 'include current tags' values are blanket reset to true</li>
+					<li>fixed an issue that was drawing animation canvases pure white on various media update events</li>
+					<li>extended manage urls dialog to support multiple files when launched from a selection of thumbnails. there is a warning in this case, noting that only gallery-style urls are appropriate to be added to multiple files</li>
+					<li>manage urls dialog now supports multiple selections, including shift-select, and accepts delete key presses for easy mass deletion</li>
+					<li>when you ask the database migration dialog to move some files, it now pops up a confirmation dialog that also asks if you would like to limit the max time for the job as 10, 30, or 60 minutes</li>
+					<li>improved file permission setting code across the program to be more sensible for non-Windows</li>
+					<li>if you are a non-Windows user and were hit with directory permission problems last week on the thumbnail update--which resulted in the rxx directories not being deleted--the update this week will attempt to do the delete again, this time correcting the now missing execute permission bit. if it finds outstanding rxx directories to delete, it will give a popup beforehand summarising the situation and giving you a chance to bail out</li>
+					<li>fixed yet another problem that was stopping client api url requests from finding the correct page by name</li>
+					<li>when a client api url request includes fixed tags, these tags should now propagate in all scenarios where the single url produces multiple files</li>
+					<li>updated sqlite dll and console for windows</li>
+					<li>misc fixes and cleanup</li>
+				</ul>
+				<li><h3>version 345</h3></li>
+				<ul>
+					<li>or search:</li>
+					<li>set out a plan to achieve some simple conjunctive normal form (e.g. (blue eyes OR green eyes) AND (blonde hair OR red hair)) OR search support</li>
+					<li>started work on the object extension and search code to support this search in a very basic (and likely inefficient-for-some-scenarios) way--we'll work on this as we discover the most common inefficiencies</li>
+					<li>.</li>
+					<li>thumbnails:</li>
+					<li>the client no longer uses both 'master' and 'resized' thumbnails--it uses a single, smarter thumbnail</li>
+					<li>only the 'txx' thumbnail directories (formerly referred to as full-size) are now used, and the thumbnails inside will regenerate and scale themselves as needed on demand (and will be careful to not save changes to disk when when their source file is non-local)</li>
+					<li>the old 'rxx' 'resized' thumbnail directories are no longer referred to anywhere in the code or ui</li>
+					<li>the old 'rxx' thumbnails directories will be permanently (i.e. no recycle bin) deleted on update. this is a big job, and you will be prompted on update before it happens</li>
+					<li>if you have migrated your db to put 'resized' thumbs on an SSD but not the formerly 'full-size', you will want to recheck the 'migrate database' dialog once you have booted and set a new thumbnail override to move the txx directories over</li>
+					<li>due to the smarter thumbnail, 200x200 is no longer the hard limit for hydrus thumbnails! you can now set up to 2048x2048</li>
+					<li>all file storage location information is now stored directly in the client db (rather than the options object), which should make for more easily export/importable options in future and improve manual fixing as needed</li>
+					<li>added more thumbnail-resizing related popup spam to file report mode</li>
+					<li>fixed a windows-only issue that was making the migrate db dialog close after a file move event concluded</li>
+					<li>updated database migration help for new concepts and ui</li>
+					<li>cleaned up some misc storage code</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>fixed a problem in the client api with fetching file identifiers from file_ids</li>
+					<li>fleshed out 'help my db is broke.txt' with more specific clone recovery examples</li>
+					<li>fixed import support for a variety of single-frame music webms</li>
+					<li>fixed an edge-case preview viewer initialisation bug that was trying to draw the canvas before any media was set</li>
+					<li>network report mode now states url classes of urls about to be parsed</li>
+					<li>misc small fixes and cleanup</li>
+				</ul>
+				<li><h3>version 344</h3></li>
+				<ul>
+					<li>final v1.0 client api polish:</li>
+					<li>added optional 'show_destination_page' arg to '/add_urls/add_url', defaulting to False, to control whether an URL-add will select (i.e. jump to) the destination page in the ui. this changes the default behaviour for this command</li>
+					<li>simplified the routine that finds or creates a watcher or url import page and fixed a bug in the api that was not creating new pages when destination_page_name was specified</li>
+					<li>some misc cleanup</li>
+					<li>fixed fetching file_metadata by hashes</li>
+					<li>fixed the client api help regarding file_metadata response example tags</li>
+					<li>client api version is now 5</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>psd support added! because of this format's potential multi-layer complexity, it will not render natively, but width and height are parsed. it is treated as 'application/x-photoshop'. PSB is also recognised and treated as psd</li>
+					<li>added a 'open_known_url' shortcut to the 'media' shortcut set that lets you quickly open URLs for files. if there is one recognised known url, it will be launched, and if there are multiple, a list with all known urls will appear to select which one you want</li>
+					<li>animation scanbars now show an x/y current timestamp! it includes millisecond timings and even works for variable framerate gifs. whether to show a second/shadow caret for timestamp position on variable frame rate is a new discussion to have</li>
+					<li>fixed an issue where animations would sometimes not resume animation for several seconds after a big scanbar drag</li>
+					<li>when the thumbnail manager cannot produce a thumbnail due to a storage error (like a missing file), it now only puts up a single, more informative error popup on the first problem. subsequent errors are printed silently to the log. (these errors tend to come in en masse, so this cuts down on spam and error-related ui lag that was making loading a bad session difficult)</li>
+					<li>improved error reporting when an upload pending command would fail due to service non-functionality--it should now give a popup with error info imediately, rather than obscured through the login system</li>
+					<li>added temp_dir parameter to the client and server that will override which temporary directory the program will use</li>
+					<li>cleaned up how no_daemons and no_wal mode are handled internally</li>
+					<li>no_wal mode now has to be called from the command parameter, the no_wal file hack in the db directory no longer works</li>
+					<li>missing ffmpeg errors now prompt the user to check if it is installed</li>
+					<li>searching for numerical ratings should now work for files that were rated when the service had a different number of stars (ratings now searches in 'bands' rather than exact values)</li>
+					<li>reduced the min height of the new import files frame's list</li>
+					<li>doubled the decompression bomb test to permit files up to ~179 megapixel, we'll see how it goes</li>
+					<li>misc cleanup</li>
+				</ul>
+				<li><h3>version 343</h3></li>
+				<ul>
+					<li>client api:</li>
+					<li>fixed an int/str type mismatch issue with service_names_to_actions_to_tags in /add_tags/add_tags in the client api that meant that argument was not working</li>
+					<li>fixed up some last /get_files/search_files stuff</li>
+					<li>added /get_files/file_metadata</li>
+					<li>added /get_files/file</li>
+					<li>added /get_files/thumbnail</li>
+					<li>added help and unit tests to reflect the above</li>
+					<li>updated client api version to 4</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>the list of paths in the manual file import dialog is now sortable. this order will be preserved in regular and 'add tags' ok events for this dialog. it has a new '#' column so you can return to 'parse' order if desired</li>
+					<li>animation and static image windows in the media viewer canvas are now recycled through media type transitions, making for slightly smoother browsing between mixed media</li>
+					<li>increased aggression of media viewer image prefetch</li>
+					<li>added support for 'MM' Tiffs</li>
+					<li>fixed webm mime parsing for webms with no audio (these were falling back to mkv)</li>
+					<li>improved the error reports when a serialised png fails to import</li>
+					<li>the mass-open-urls popup is now pausable as well as cancellable</li>
+					<li>fixed several recently broken ui unit tests</li>
+					<li>misc old code cleanup</li>
+					<li>some misc test controller/constant refactoring</li>
+				</ul>
+				<li><h3>version 342</h3></li>
+				<ul>
+					<li>added support for webp import. it does not yet support animated webps, which, if the local platform supports, will import like apngs used to: just the first frame</li>
+					<li>added support for tiff import. it works ok for 24bit and 8bit (monochrome) tiffs, but I am not sure how well it will do with 48bit</li>
+					<li>both webp and tiff should work on the duplicate files system</li>
+					<li>improved webm detection to include opus audio (previously, these files were falling back to mkv)</li>
+					<li>fixed an issue where unusual formats with duration but no frames or frames but no duration were being sorted and otherwise presented incorrectly</li>
+					<li>improved autocomplete job cancelability. this job can now cancel much faster on large jobs, meaning typing searches with large result sets will hit less CPU and return faster on subsequent keystrokes</li>
+					<li>_all_ of the complicated 'copy url' commands from the thumbnail right-click->known urls menu are now available on the 'open' submenu! if there is more than one url to open (e.g. 'open all of these files blahbooru post urls' on a selection of 50 files), you will be presented with a yes/no dialog to confirm, and it will open one url in your browser every second (with a cancellable popup if num_urls > 5)</li>
+					<li>by default, system:everything is now hidden if its total files is >10k. you can force it to always show under options->default system predicates</li>
+					<li>the gallery downloader's list's status column now shows gallery status (deferring to active file status) when appropriate and shows 'done!' when all work is complete</li>
+					<li>after working back and forth with a user, I _believe_ the linux similar files >0 distance search crash is finally fixed</li>
+					<li>fixed sorting by media views/viewtiming with collections</li>
+					<li>a single-selected collection right-click now shows total media views for all files in the collection! you can now see how long you have been viewing an artist!</li>
+					<li>fixed an issue that lead to export folders not running on always-on clients as often as they should</li>
+					<li>updated the gelbooru 0.2.5 file page parser to pull rating tag from the correct location (previously, it was pulling from what appears to be a site-wide 'mature' browser hint)</li>
+					<li>improved memory cleanup stability when animations and other parts of the video rendering pipeline are deleted--this _may_ fix some rare crashes</li>
+					<li>increased animation rendering aggression overall and particularly in 'future' of frame buffer</li>
+					<li>if a video renderer that is asked to start some way into the video fails to render anything, it will now fall back to trying to render from the beginning. this is slightly hacky atm and leads to out of phase rendering frames, but it is better than an error</li>
+					<li>added a '--no_db_temp_files' launch parameter that will force the client or server to return to the recent old behaviour of exclusively using memory for journalling. this is useful if your temp directory is small and/or your available ram is very large. if running in this mode, the client will attempt to check available memory (instead of free space on your temp dir) before performing very large transactions</li>
+					<li>with the new lighter-weight update transactions, the client now tests for less free space for journalling before running repository update processing</li>
+					<li>added /get_files/search_files to the client api, which does the first half of file searching. it allows tag search (including -tag negation) and system inbox/archive. since the second half, which will fetch file metadata, is not yet in, this can't do anything interesting yet</li>
+					<li>updated help and unit tests to support this, client api version is now 3</li>
+					<li>some misc refactoring</li>
+				</ul>
+				<li><h3>version 341</h3></li>
+				<ul>
+					<li>client api:</li>
+					<li>added /add_tags/add_tags, which does several kinds of tag content updates</li>
+					<li>added /add_tags/clean_tags, which shows how hydrus will handle potential tags</li>
+					<li>added /add_urls/associate_url, which allows you to associate urls with files</li>
+					<li>added 'destination_page_name' to /add_urls/add_url, which will choose which destination watcher/url importer to place the url (or create a new one with that name)</li>
+					<li>updated client api version to 2</li>
+					<li>updated client help and unit tests for the above</li>
+					<li>added a linked contents to the client api help</li>
+					<li>improved some server error handling, mostly moving 403s to more correct 400s</li>
+					<li>improved how missing parameter 400 errors are reported from the server vs deeper keyerrors that should be 500</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>tag repository update processing now saves progress to disk every million rows or every minute, whichever comes first. this reduces journaling bloat, improves recovery when the process quits unexpectedly, and makes for significantly faster cancel when requested by the user</li>
+					<li>when processing duplicates and copying/merging/moving ratings, the 'source' file will now also overwrite the 'destination' file's rating if that destination rating is lower (previously, the rating would only go over if the dest had no rating set)</li>
+					<li>added a new 'thumbnail experiment mode' under help->debug->gui. this will load fullsize thumbs and resize them in memory, please see release post for more details</li>
+					<li>reduced menubar replacement flicker while, I believe, keeping and strengthening recent menubar indexing stability improvements</li>
+					<li>the tag autocomplete dropdown will now always embed (instead of floating) in non-Windows</li>
+					<li>when data seems non-decodable, the fallback encoding format is now that given by chardet, rather than utf-8</li>
+					<li>improved serialisability of some pending tag data</li>
+					<li>watchers can now hold and pass on fixed pending tag data</li>
+					<li>gallery log objects can now hold and pass on fixed pending tag data</li>
+					<li>file import objects can now hold and action fixed pending tag data</li>
+					<li>hard drive imports now store their paths-to-tags info in this new format, directly in the file import objects</li>
+					<li>improved some url-import page drop-target-selection logic</li>
+					<li>improved error reporting when dropping/api-adding urls</li>
+					<li>adjusted some url import workflow so big 'already in db' download lists should work a bit faster</li>
+					<li>attempting to start the program with some external database files but not the main 'client.db/server.db' file will now cause a boot-fail exception with an explanation before any stub db files can be made</li>
+					<li>tightened up some hydrus service login-capability-testing code that was previously stopping certain error states from recovering promptly, even on a force account refresh, while the service was maxed on bandwidth</li>
+					<li>fixed a source of linux CRITICAL logspam related to several common dialogs</li>
+					<li>improved ui stability on boot when file folders are missing (particularly for linux)</li>
+					<li>improved stability for the various async tasks on the duplicates processing page, particularly for linux. I am not sure I got everything here, but it is definitely better</li>
+					<li>did some more misc stability improvements, particularly in various boot fail scenarios</li>
+					<li>completely removed an ancient and janky focus catcher widget from the main gui frame</li>
+					<li>now various db caching is improved on the python side, removed a sqlite instruction to force temp information to always stay in memory--hot data returns to staying mostly in memory to start and then spools to disk if the transaction gets too large</li>
+					<li>fixed approx bitrate sorting for malformed video files with explicitly '0' duration</li>
+					<li>daemon_profile_mode now spams some more info about export folders</li>
+					<li>fixed an issue that meant client db maintenance was firing its jobs too aggressively, regardless of idle status</li>
+					<li>updated windows build to cv 4.0</li>
+					<li>misc refactoring and fixes</li>
+				</ul>
+				<li><h3>version 340</h3></li>
+				<ul>
+					<li>client api:</li>
+					<li>fixed up some api permissions object stuff so that /verify_access_key response can always serialise correctly</li>
+					<li>fixed the 'add_url' api call's instability</li>
+					<li>the API will now always return JSON on 200. anything else should be presumed to be raw text</li>
+					<li>'/api_version' now returns JSON, and after talking with users, it will now start incrementing with every api change. it remains 1 just for this week</li>
+					<li>'/request_access_permissions' now returns JSON</li>
+					<li>'/add_url' now results JSON on success with more info, 403 on failure</li>
+					<li>'/get_url_info' now returns the 'normalised_url' in the response JSON</li>
+					<li>added '/get_url_files', which returns 'url_file_statuses', listing known hashes and file import status for that url</li>
+					<li>added '/add_files/add_file', which can import a file from a path or bytes</li>
+					<li>added '/add_tags/get_tag_services', which will return info on the client's tag services</li>
+					<li>updated client api help to reflect the above changes and fleshed out the intro a bit</li>
+					<li>fixed the client api permissions enum values in the help, which I somehow transcribed wrong first time</li>
+					<li>updated the client api tests to check the above</li>
+					<li>refactored client api tests to be neater and in their own file</li>
+					<li>.</li>
+					<li>the rest:</li>
+					<li>fixed the page of pages close bug</li>
+					<li>added a downloader for nijie.info to the client defaults (it needs a login)</li>
+					<li>updated danbooru file page parsers to get 'rating' tag</li>
+					<li>added gelbooru 0.1.11 parser for future application</li>
+					<li>fixed an issue that was stopping advanced content updates from fully copying all the desired mappings in the transaction</li>
+					<li>added a semi-hacky checkbox to 'options->files and trash' that will delay all new file/thumb requests for 15s after the computer resumes from sleep (useful if your files are on a NAS that takes a few seconds to reconnect on wake)</li>
+					<li>wrote some more graceful fallback decoding handling code that attempts original assumed encoding and 'utf-8' if different and returns the one with the fewest '�' replacement characters</li>
+					<li>the network engine and the ffmpeg info parsing now use this new 'safe' decoding, so even if a site has borked bytes or the video file has unexpected Shift-JIS title metadata, it'll still go through, albeit with some question marks</li>
+					<li>moved some more old daemons to the new job scheduler, deleted some old daemon code</li>
+					<li>improved some daemon job wake and shutdown code</li>
+					<li>wrote a proper upnp manager object and improved all-around reliability of the auto upnp-service-mapping code</li>
+					<li>simplified the upnp check code so it now only ever checks/does anything if the respective services actually want upnp mappings. surplus mappings are now wiped immediately on service update</li>
+					<li>fixed upnp mapping fetching to cope with ipv6 results</li>
+					<li>improved some memory clearing code to deal with some semi-stubborn objects</li>
+					<li>improved some 'iterate through this giant list of single numbers from the db without using a lot of memory' code and applied it to the autocomplete cache regeneration routine</li>
+					<li>improved menubar stability, both in finding menus and swapping them out</li>
+					<li>if a serialised json object fails to load from the db, this is now caught, the bad object deleted and written to a new file in the db dir, and all logging info captured along with an explanatory popup thrown on screen. so, if a subscription fails to load, it will now be extracted so that a subsequent subscription edit/run will work with the remaining good objects. in the case of backed-up objects (gui sessions atm), reattempting the load should restore the next most recent backup</li>
+					<li>fixed an issue with login script validation when the given credentials have surplus ( key, value ) pairs to the script's credential definitions</li>
+					<li>fixed two login invalid cookie error handling bugs</li>
+					<li>maybe made some dupe filter searching more stable</li>
+					<li>fixed a py2 datatype issue that made the client unbootable when updating the client from <296</li>
+					<li>the client now pauses to nag and moan about backups if you try to update more than 15 versions in one go</li>
+					<li>slightly sped up discord bugfix file drag and drops and expanded file limit up to 25 files/200MB</li>
+					<li>added experimental secret discord bugfix dnd mode checkbox</li>
+					<li>improved how html parsing deals with some unexpected bad tag data</li>
+					<li>turned on primitive high-dpi support for OS X. let me know if it fixes any blurry issues on retina displays</li>
+					<li>wrote a new 'ui test' under the debug->gui menu to help catch common-action bugs that slipped through weekly work</li>
+					<li>improved how the test code does some wx/ui stuff, but also broke some more and ran out of time to clean it up--this is an ongoing project</li>
+					<li>improved how some text import line splitting works</li>
+					<li>misc fixes</li>
+				</ul>
+				<li><h3>version 339</h3></li>
+				<ul>
+					<li>client api:</li>
+					<li>wrote some ui to handle client api permissions adding and editing</li>
+					<li>wrote a 'catch a permissions request' mini-dialog for external api permissions adding</li>
+					<li>wrote api calls:</li>
+					<li>GET</li>
+					<li>/api_version</li>
+					<li>/request_new_permissions</li>
+					<li>/verify_access_key</li>
+					<li>/add_urls/get_url_info</li>
+					<li>POST</li>
+					<li>/add_urls/add_url</li>
+					<li>and made a new 'client api' help page to describe in detail what these do</li>
+					<li>wrote fairly comprehensive unit tests for the new client api</li>
+					<li>refactored a bunch of 'hydrus network' specific stuff away from general server code that the client api now uses</li>
+					<li>neatened up 401 vs 403 error handling across the program, and replaced some clientside error handling that was inelegantly borrowing these network errors</li>
+					<li>deleted very old prototype file/thumbnail client server fetch code, which was no longer in use</li>
+					<li>.</li>
+					<li>misc and bug fixes:</li>
+					<li>added a 'clear ratings' button to the ratings service 'review services' panels. it can clear out ratings for deleted, non-local, or _all_ files</li>
+					<li>the '3 downloaders are working, is it ok to close the client?' message is now folded into the 'confirm client exit (auto-yes in 15s)' dialog. this merged dialog will still appear for users who have the regular confirm client exit dialog turned off (and still auto-yeses in 15s)</li>
+					<li>the file url downloader now reports 'downloading file' and 'importing url' text status separately</li>
+					<li>fixed a typo bug from last week that was breaking asc/desc ratings service sorting</li>
+					<li>fixed a typo bug from last week that was stopping manage import folders from opening</li>
+					<li>fixed a typo bug from last week that was breaking setting upnp port on the local booru/client api service management panel</li>
+					<li>the advanced file reparse-and-re-thumbnailing routine now correctly moves a file to its new extension if its mime changes (e.g. png->apng, or webm/mkv distinctions)</li>
+					<li>the client file manager now silently detects and auto-repairs instances of missing files where the file actually does exist, just with the wrong extension</li>
+					<li>fixed a url parsing issue that was normalise-mangling url classes with no path but some query parameters</li>
+					<li>the network engine now uses utf-8 decoding when no specific encoding is set (previously ISO-8859-1)</li>
+					<li>fixed an ffmpeg video parsing bug when the video included Shift-JIS metadata. it should work for other unusual encodings as well</li>
+					<li>maybe cleaned up some menubar management code</li>
+					<li>the filename tagging dialog now uses a notebook for service choice, like the manage tags dialog, rather than the janky old listbook</li>
+					<li>fixed a py2-to-3 issue with the admin-only 'is server currently busy' check while a backup is running</li>
+					<li>improved some dialog button event handling. it may completely fix the 'trytoendmodal' issue some users run into</li>
+					<li>improved some JSON db serialisation error reporting code, trying to pin down an issue several users have seen with session save</li>
+					<li>improved thread-safety of serialisable objects as they serialise</li>
+					<li>misc improvements and cleanup</li>
+				</ul>
 				<li><h3>version 338</h3></li>
 				<ul>
 					<li>after talking with some users, put a bit of time into tag autocomplete wolkflow. both read (search pages) and write (manage tags) autocomplete inputs now operate ~asynchronously~, with the tag fetch working on a separate thread. tag jobs can also now cancel at certain checkpoints in the tag search process if overwritten by a new request. therefore, a variety of tag lookup scenarios _should_ be less painful. this change was executed in a semi-inelegant way, so please report if you encounter bugs from fast typing etc...</li>

@@ -14,6 +14,7 @@ from . import ClientImportFileSeeds
 from . import ClientRatings
 from . import ClientSearch
 from . import ClientServices
+from . import ClientTags
 import collections
 from . import HydrusConstants as HC
 from . import HydrusData
@@ -28,7 +29,7 @@ from . import ServerDB
 import shutil
 import sqlite3
 import stat
-from . import TestConstants
+from . import TestController
 import time
 import threading
 import unittest
@@ -42,7 +43,7 @@ class TestClientDB( unittest.TestCase ):
         cls._delete_db()
         
         # class variable
-        cls._db = ClientDB.DB( HG.test_controller, TestConstants.DB_DIR, 'client' )
+        cls._db = ClientDB.DB( HG.test_controller, TestController.DB_DIR, 'client' )
         
     
     @classmethod
@@ -59,7 +60,7 @@ class TestClientDB( unittest.TestCase ):
         
         for filename in db_filenames:
             
-            path = os.path.join( TestConstants.DB_DIR, filename )
+            path = os.path.join( TestController.DB_DIR, filename )
             
             os.remove( path )
             
@@ -70,7 +71,7 @@ class TestClientDB( unittest.TestCase ):
     @classmethod
     def setUpClass( cls ):
         
-        cls._db = ClientDB.DB( HG.test_controller, TestConstants.DB_DIR, 'client' )
+        cls._db = ClientDB.DB( HG.test_controller, TestController.DB_DIR, 'client' )
         
         HG.test_controller.SetRead( 'hash_status', ( CC.STATUS_UNKNOWN, None, '' ) )
         
@@ -241,6 +242,18 @@ class TestClientDB( unittest.TestCase ):
             for ( inclusive, tag, result ) in tests:
                 
                 predicates = [ ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, tag, inclusive ) ]
+                
+                search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = predicates )
+                
+                file_query_ids = self._read( 'file_query_ids', search_context )
+                
+                self.assertEqual( len( file_query_ids ), result )
+                
+            
+        
+        def run_or_predicate_tests( tests ):
+            
+            for ( predicates, result ) in tests:
                 
                 search_context = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = predicates )
                 
@@ -476,13 +489,70 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        like_rating_service_key = HydrusData.GenerateKey()
-        numerical_rating_service_key = HydrusData.GenerateKey()
+        tests = []
+        
+        preds = []
+        
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'car' ) )
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'bus' ) )
+        
+        or_pred = ClientSearch.Predicate( HC.PREDICATE_TYPE_OR_CONTAINER, preds )
+        
+        tests.append( ( [ or_pred ], 1 ) )
+        
+        preds = []
+        
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'car' ) )
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 201 ) ) )
+        
+        or_pred = ClientSearch.Predicate( HC.PREDICATE_TYPE_OR_CONTAINER, preds )
+        
+        tests.append( ( [ or_pred ], 1 ) )
+        
+        preds = []
+        
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'truck' ) )
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'bus' ) )
+        
+        or_pred = ClientSearch.Predicate( HC.PREDICATE_TYPE_OR_CONTAINER, preds )
+        
+        tests.append( ( [ or_pred ], 0 ) )
+        
+        preds = []
+        
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'truck', inclusive = False ) )
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'bus' ) )
+        
+        or_pred = ClientSearch.Predicate( HC.PREDICATE_TYPE_OR_CONTAINER, preds )
+        
+        tests.append( ( [ or_pred ], 1 ) )
+        
+        preds = []
+        
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'car' ) )
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'truck' ) )
+        
+        or_pred_1 = ClientSearch.Predicate( HC.PREDICATE_TYPE_OR_CONTAINER, preds )
+        
+        preds = []
+        
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'maker:toyota' ) )
+        preds.append( ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'maker:ford' ) )
+        
+        or_pred_2 = ClientSearch.Predicate( HC.PREDICATE_TYPE_OR_CONTAINER, preds )
+        
+        tests.append( ( [ or_pred_1, or_pred_2 ], 1 ) )
+        
+        run_or_predicate_tests( tests )
+        
+        #
+        
+        from . import TestController
         
         services = self._read( 'services' )
         
-        services.append( ClientServices.GenerateService( like_rating_service_key, HC.LOCAL_RATING_LIKE, 'test like rating service' ) )
-        services.append( ClientServices.GenerateService( numerical_rating_service_key, HC.LOCAL_RATING_NUMERICAL, 'test numerical rating service' ) )
+        services.append( ClientServices.GenerateService( TestController.LOCAL_RATING_LIKE_SERVICE_KEY, HC.LOCAL_RATING_LIKE, 'test like rating service' ) )
+        services.append( ClientServices.GenerateService( TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY, HC.LOCAL_RATING_NUMERICAL, 'test numerical rating service' ) )
         
         self._write( 'update_services', services )
         
@@ -492,7 +562,7 @@ class TestClientDB( unittest.TestCase ):
         
         content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ like_rating_service_key ] = content_updates
+        service_keys_to_content_updates[ TestController.LOCAL_RATING_LIKE_SERVICE_KEY ] = content_updates
         
         self._write( 'content_updates', service_keys_to_content_updates )
         
@@ -502,29 +572,29 @@ class TestClientDB( unittest.TestCase ):
         
         content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.6, ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ numerical_rating_service_key ] = content_updates
+        service_keys_to_content_updates[ TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = content_updates
         
         self._write( 'content_updates', service_keys_to_content_updates )
         
         tests = []
         
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 1.0, like_rating_service_key ), 1 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 0.0, like_rating_service_key ), 0 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'rated', like_rating_service_key ), 1 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'not rated', like_rating_service_key ), 0 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 1.0, TestController.LOCAL_RATING_LIKE_SERVICE_KEY ), 1 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 0.0, TestController.LOCAL_RATING_LIKE_SERVICE_KEY ), 0 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'rated', TestController.LOCAL_RATING_LIKE_SERVICE_KEY ), 1 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'not rated', TestController.LOCAL_RATING_LIKE_SERVICE_KEY ), 0 ) )
         
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 0.6, numerical_rating_service_key ), 1 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 1.0, numerical_rating_service_key ), 0 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.6, numerical_rating_service_key ), 0 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.4, numerical_rating_service_key ), 1 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'rated', numerical_rating_service_key ), 1 ) )
-        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'not rated', numerical_rating_service_key ), 0 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 0.6, TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ), 1 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 1.0, TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ), 0 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.6, TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ), 0 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.4, TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ), 1 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'rated', TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ), 1 ) )
+        tests.append( ( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '=', 'not rated', TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ), 0 ) )
         
         run_system_predicate_tests( tests )
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ) )
+        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
         service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
         
@@ -581,130 +651,135 @@ class TestClientDB( unittest.TestCase ):
     
     def test_gui_sessions( self ):
         
-        test_frame = wx.Frame( None )
+        def wx_code():
+            
+            test_frame = TestController.TestFrame()
+            
+            try:
+                
+                session = ClientGUIPages.GUISession( 'test_session' )
+                
+                #
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerImportGallery()
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerImportMultipleWatcher()
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                service_keys_to_tags = ClientTags.ServiceKeysToTags( { HydrusData.GenerateKey() : [ 'some', 'tags' ] } )
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerImportHDD( [ 'some', 'paths' ], ClientImportOptions.FileImportOptions(), { 'paths' : service_keys_to_tags }, True )
+                
+                management_controller.GetVariable( 'hdd_import' ).PausePlay() # to stop trying to import 'some' 'paths'
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerImportSimpleDownloader()
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerPetitions( HG.test_controller.example_tag_repo_service_key )
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [] )
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'search', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, tag_service_key = CC.LOCAL_TAG_SERVICE_KEY, predicates = [] )
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'search', CC.LOCAL_FILE_SERVICE_KEY, fsc, False )
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [ HydrusData.GenerateKey() for i in range( 200 ) ] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.SYSTEM_PREDICATE_ARCHIVE ] )
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'files', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'tag', min_current_count = 1, min_pending_count = 3 ) ] )
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'wew lad', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.2, TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ) ), ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_FILE_SERVICE, ( True, HC.CONTENT_STATUS_CURRENT, CC.LOCAL_FILE_SERVICE_KEY ) ) ] )
+                
+                management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'files', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
+                
+                page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
+                
+                session.AddPageTuple( page )
+                
+                #
+                
+                self._write( 'serialisable', session )
+                
+                result = self._read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_GUI_SESSION, 'test_session' )
+                
+                page_names = []
+                
+                for ( page_type, page_data ) in result.GetPageTuples():
+                    
+                    if page_type == 'page':
+                        
+                        ( management_controller, initial_hashes ) = page_data
+                        
+                        page_names.append( management_controller.GetPageName() )
+                        
+                    
+                
+                self.assertEqual( page_names, [ 'gallery', 'watcher', 'import', 'simple downloader', 'example tag repo petitions', 'search', 'search', 'files', 'wew lad', 'files' ] )
+                
+            finally:
+                
+                test_frame.DestroyLater()
+                
+            
         
-        try:
-            
-            session = ClientGUIPages.GUISession( 'test_session' )
-            
-            #
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerImportGallery()
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerImportMultipleWatcher()
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            service_keys_to_tags = { HydrusData.GenerateKey() : [ 'some', 'tags' ] }
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerImportHDD( [ 'some', 'paths' ], ClientImportOptions.FileImportOptions(), { 'paths' : service_keys_to_tags }, True )
-            
-            management_controller.GetVariable( 'hdd_import' ).PausePlay() # to stop trying to import 'some' 'paths'
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerImportSimpleDownloader()
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerPetitions( HG.test_controller.example_tag_repo_service_key )
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [] )
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'search', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, tag_service_key = CC.LOCAL_TAG_SERVICE_KEY, predicates = [] )
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'search', CC.LOCAL_FILE_SERVICE_KEY, fsc, False )
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [ HydrusData.GenerateKey() for i in range( 200 ) ] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.SYSTEM_PREDICATE_ARCHIVE ] )
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'files', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.Predicate( HC.PREDICATE_TYPE_TAG, 'tag', min_current_count = 1, min_pending_count = 3 ) ] )
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'wew lad', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            fsc = ClientSearch.FileSearchContext( file_service_key = CC.LOCAL_FILE_SERVICE_KEY, predicates = [ ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.2, TestConstants.LOCAL_RATING_NUMERICAL_SERVICE_KEY ) ), ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_FILE_SERVICE, ( True, HC.CONTENT_STATUS_CURRENT, CC.LOCAL_FILE_SERVICE_KEY ) ) ] )
-            
-            management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'files', CC.LOCAL_FILE_SERVICE_KEY, fsc, True )
-            
-            page = ClientGUIPages.Page( test_frame, HG.test_controller, management_controller, [] )
-            
-            session.AddPage( page )
-            
-            #
-            
-            self._write( 'serialisable', session )
-            
-            result = self._read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_GUI_SESSION, 'test_session' )
-            
-            page_names = []
-            
-            for ( page_type, page_data ) in result.GetPages():
-                
-                if page_type == 'page':
-                    
-                    ( management_controller, initial_hashes ) = page_data
-                    
-                    page_names.append( management_controller.GetPageName() )
-                    
-                
-            
-            self.assertEqual( page_names, [ 'gallery', 'watcher', 'import', 'simple downloader', 'example tag repo petitions', 'search', 'search', 'files', 'wew lad', 'files' ] )
-            
-        finally:
-            
-            test_frame.DestroyLater()
-            
+        HG.test_controller.CallBlockingToWX( HG.test_controller.win, wx_code )
         
     
     def test_import( self ):
@@ -792,8 +867,8 @@ class TestClientDB( unittest.TestCase ):
     
     def test_import_folders( self ):
         
-        import_folder_1 = ClientImportLocal.ImportFolder( 'imp 1', path = TestConstants.DB_DIR, mimes = HC.VIDEO, publish_files_to_popup_button = False )
-        import_folder_2 = ClientImportLocal.ImportFolder( 'imp 2', path = TestConstants.DB_DIR, mimes = HC.IMAGES, period = 1200, publish_files_to_popup_button = False )
+        import_folder_1 = ClientImportLocal.ImportFolder( 'imp 1', path = TestController.DB_DIR, mimes = HC.VIDEO, publish_files_to_popup_button = False )
+        import_folder_2 = ClientImportLocal.ImportFolder( 'imp 2', path = TestController.DB_DIR, mimes = HC.IMAGES, period = 1200, publish_files_to_popup_button = False )
         
         #
         
@@ -826,17 +901,17 @@ class TestClientDB( unittest.TestCase ):
     
     def test_init( self ):
         
-        self.assertTrue( os.path.exists( TestConstants.DB_DIR ) )
+        self.assertTrue( os.path.exists( TestController.DB_DIR ) )
         
-        self.assertTrue( os.path.exists( os.path.join( TestConstants.DB_DIR, 'client.db' ) ) )
+        self.assertTrue( os.path.exists( os.path.join( TestController.DB_DIR, 'client.db' ) ) )
         
-        client_files_default = os.path.join( TestConstants.DB_DIR, 'client_files' )
+        client_files_default = os.path.join( TestController.DB_DIR, 'client_files' )
         
         self.assertTrue( os.path.exists( client_files_default ) )
         
         for prefix in HydrusData.IterateHexPrefixes():
             
-            for c in ( 'f', 't', 'r' ):
+            for c in ( 'f', 't' ):
                 
                 dir = os.path.join( client_files_default, c + prefix )
                 
@@ -885,7 +960,7 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ) )
+        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
         service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
         
@@ -1187,7 +1262,7 @@ class TestServerDB( unittest.TestCase ):
     @classmethod
     def setUpClass( cls ):
         
-        cls._db = ServerDB.DB( HG.test_controller, TestConstants.DB_DIR, 'server' )
+        cls._db = ServerDB.DB( HG.test_controller, TestController.DB_DIR, 'server' )
         
     
     @classmethod
@@ -1269,11 +1344,11 @@ class TestServerDB( unittest.TestCase ):
         
         self.assertNotEqual( access_key, access_key_2 )
         
-        self.assertRaises( HydrusExceptions.ForbiddenException, self._read, 'account_key_from_access_key', self._tag_service_key, access_key )
+        self.assertRaises( HydrusExceptions.InsufficientCredentialsException, self._read, 'account_key_from_access_key', self._tag_service_key, access_key )
         
         account_key = self._read( 'account_key_from_access_key', self._tag_service_key, access_key_2 )
         
-        self.assertRaises( HydrusExceptions.ForbiddenException, self._read, 'access_key', r_key )
+        self.assertRaises( HydrusExceptions.InsufficientCredentialsException, self._read, 'access_key', r_key )
         
     
     def _test_content_creation( self ):
