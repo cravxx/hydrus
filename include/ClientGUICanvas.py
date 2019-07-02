@@ -5,10 +5,12 @@ from . import HydrusGlobals as HG
 from . import ClientCaches
 from . import ClientConstants as CC
 from . import ClientData
+from . import ClientDuplicates
 from . import ClientGUICommon
 from . import ClientGUIDialogs
 from . import ClientGUIDialogsManage
 from . import ClientGUIDialogsQuick
+from . import ClientGUIFunctions
 from . import ClientGUIHoverFrames
 from . import ClientGUIMedia
 from . import ClientGUIMenus
@@ -22,6 +24,7 @@ from . import ClientMedia
 from . import ClientPaths
 from . import ClientRatings
 from . import ClientRendering
+from . import ClientSearch
 from . import ClientTags
 from . import ClientThreading
 import gc
@@ -446,7 +449,7 @@ class Animation( wx.Window ):
                 
             
         
-        screen_position = ClientGUICommon.ClientToScreen( self, event.GetPosition() )
+        screen_position = ClientGUIFunctions.ClientToScreen( self, event.GetPosition() )
         ( x, y ) = self.GetParent().ScreenToClient( screen_position )
         
         event.SetX( x )
@@ -1155,6 +1158,11 @@ class CanvasFrame( ClientGUITopLevelWindows.FrameThatResizes ):
         self.Bind( wx.EVT_CLOSE, self._canvas_window.EventClose )
         
     
+    def TakeFocusForUser( self ):
+        
+        self._canvas_window.SetFocus()
+        
+    
 class Canvas( wx.Window ):
     
     BORDER = wx.SIMPLE_BORDER
@@ -1251,21 +1259,6 @@ class Canvas( wx.Window ):
         return True
         
     
-    def _CanProcessInput( self ):
-        
-        if HG.client_controller.MenuIsOpen():
-            
-            return False
-            
-        
-        if self._MouseIsOverFlash():
-            
-            return False
-            
-        
-        return True
-        
-    
     def _CopyBMPToClipboard( self ):
         
         if self._current_media is not None:
@@ -1332,68 +1325,45 @@ class Canvas( wx.Window ):
             
         
     
-    def _Delete( self, service_key = None ):
+    def _Delete( self, media = None, default_reason = None, file_service_key = None ):
         
-        if self._current_media is None:
+        if media is None:
             
-            return
+            if self._current_media is None:
+                
+                return False
+                
             
-        
-        do_it = False
-        
-        if service_key is None:
-            
-            locations_manager = self._current_media.GetLocationsManager()
-            
-            if CC.LOCAL_FILE_SERVICE_KEY in locations_manager.GetCurrent():
-                
-                service_key = CC.LOCAL_FILE_SERVICE_KEY
-                
-            elif CC.TRASH_SERVICE_KEY in locations_manager.GetCurrent():
-                
-                service_key = CC.TRASH_SERVICE_KEY
-                
-            else:
-                
-                return
-                
+            media = [ self._current_media ]
             
         
-        if service_key == CC.LOCAL_FILE_SERVICE_KEY:
+        if default_reason is None:
             
-            if not HC.options[ 'confirm_trash' ]:
-                
-                do_it = True
-                
-            
-            text = 'Send this file to the trash?'
-            
-        elif service_key == CC.TRASH_SERVICE_KEY:
-            
-            text = 'Permanently delete this file?'
+            default_reason = 'Deleted from Preview or Media Viewer.'
             
         
-        if not do_it:
+        try:
             
-            with ClientGUIDialogs.DialogYesNo( self, text ) as dlg:
-                
-                if dlg.ShowModal() == wx.ID_YES:
-                    
-                    do_it = True
-                    
-                
+            ( involves_physical_delete, jobs ) = ClientGUIDialogsQuick.GetDeleteFilesJobs( self, media, default_reason, suggested_file_service_key = file_service_key )
             
-            self.SetFocus() # annoying bug because of the modal dialog
+        except HydrusExceptions.CancelledException:
+            
+            return False
             
         
-        if do_it:
+        self.SetFocus() # annoying bug because of the modal dialog
+        
+        def do_it( jobs ):
             
-            hashes = { self._current_media.GetHash() }
+            for service_keys_to_content_updates in jobs:
+                
+                HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+                
             
-            reason = 'Deleted from Preview or Media Viewer.'
-            
-            HG.client_controller.Write( 'content_updates', { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] } )
-            
+        
+        HG.client_controller.CallToThread( do_it, jobs )
+        
+        return True
         
     
     def _DoManualPan( self, delta_x_step, delta_y_step ):
@@ -1450,21 +1420,6 @@ class Canvas( wx.Window ):
             
             self._SizeAndPositionMediaContainer()
             
-        
-    
-    def _FocusIsElsewhere( self ):
-        
-        i_have_focus = ClientGUICommon.WindowOrSameTLPChildHasFocus( self )
-        my_hover_window_has_focus = ClientGUICommon.WindowOrAnyTLPChildHasFocus( self ) and isinstance( ClientGUICommon.GetFocusTLP(), ClientGUIHoverFrames.FullscreenHoverFrame )
-        
-        focus_is_elsewhere = not ( i_have_focus or my_hover_window_has_focus )
-        
-        if focus_is_elsewhere:
-            
-            return True
-            
-        
-        return False
         
     
     def _GenerateOrderedShortcutNames( self ):
@@ -1551,6 +1506,11 @@ class Canvas( wx.Window ):
         return self._GetShowAction( self._current_media ) not in ( CC.MEDIA_VIEWER_ACTION_SHOW_OPEN_EXTERNALLY_BUTTON, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW )
         
     
+    def _IShouldCatchShortcutEvent( self ):
+        
+        return ClientGUIShortcuts.IShouldCatchShortcutEvent( self, child_tlp_classes_who_can_pass_up = ( ClientGUIHoverFrames.FullscreenHoverFrame, ) )
+        
+    
     def _MaintainZoom( self, previous_media ):
         
         if previous_media is None:
@@ -1610,7 +1570,7 @@ class Canvas( wx.Window ):
                 
                 control = wx.TextCtrl( panel, style = wx.TE_MULTILINE )
                 
-                size = ClientGUICommon.ConvertTextToPixels( control, ( 80, 14 ) )
+                size = ClientGUIFunctions.ConvertTextToPixels( control, ( 80, 14 ) )
                 
                 control.SetInitialSize( size )
                 
@@ -1867,7 +1827,7 @@ class Canvas( wx.Window ):
         self._last_drag_coordinates = None
         
     
-    def _SaveCurrentMediaViewTime( self, views_delta = 0 ):
+    def _SaveCurrentMediaViewTime( self ):
         
         now = HydrusData.GetNow()
         
@@ -1886,12 +1846,19 @@ class Canvas( wx.Window ):
             
         else:
             
-            viewtype = 'media'
+            if isinstance( self, CanvasFilterDuplicates ):
+                
+                viewtype = 'media_duplicates_filter'
+                
+            else:
+                
+                viewtype = 'media'
+                
             
         
         hash = self._current_media.GetHash()
         
-        HG.client_controller.file_viewing_stats_manager.Update( viewtype, hash, views_delta, viewtime_delta )
+        HG.client_controller.file_viewing_stats_manager.FinishViewing( viewtype, hash, viewtime_delta )
         
     
     def _SetDirty( self ):
@@ -2097,7 +2064,12 @@ class Canvas( wx.Window ):
     
     def _ZoomSwitch( self ):
         
-        if self._current_media is not None and self._IsZoomable() and self._canvas_zoom != 1.0:
+        if self._current_media is not None and self._IsZoomable():
+            
+            if self._canvas_zoom == 1.0 and self._current_zoom == 1.0:
+                
+                return
+                
             
             ( my_width, my_height ) = self.GetClientSize()
             
@@ -2123,14 +2095,12 @@ class Canvas( wx.Window ):
     
     def CleanBeforeDestroy( self ):
         
-        self._SaveCurrentMediaViewTime()
-        
         self.SetMedia( None )
         
     
     def EventCharHook( self, event ):
         
-        if self._CanProcessInput() and not self._FocusIsElsewhere(): # focus is likely on a tag manager frame in this case
+        if self._IShouldCatchShortcutEvent():
             
             shortcut = ClientGUIShortcuts.ConvertKeyEventToShortcut( event )
             
@@ -2403,7 +2373,7 @@ class Canvas( wx.Window ):
                 return
                 
             
-            command_processed = ClientGUICommon.ApplyContentApplicationCommandToMedia( self, command, ( self._current_media, ) )
+            command_processed = ClientGUIFunctions.ApplyContentApplicationCommandToMedia( self, command, ( self._current_media, ) )
             
         else:
             
@@ -2439,8 +2409,6 @@ class Canvas( wx.Window ):
             previous_media = self._current_media
             
             self._current_media = media
-            
-            self._SaveCurrentMediaViewTime( views_delta = 1 )
             
             if not self._maintain_pan_and_zoom:
                 
@@ -2587,11 +2555,11 @@ class CanvasPanel( Canvas ):
             
             if CC.LOCAL_FILE_SERVICE_KEY in locations_manager.GetCurrent():
                 
-                ClientGUIMenus.AppendMenuItem( self, menu, 'delete', 'Delete this file.', self._Delete, CC.LOCAL_FILE_SERVICE_KEY )
+                ClientGUIMenus.AppendMenuItem( self, menu, 'delete', 'Delete this file.', self._Delete, file_service_key = CC.LOCAL_FILE_SERVICE_KEY )
                 
             elif CC.TRASH_SERVICE_KEY in locations_manager.GetCurrent():
                 
-                ClientGUIMenus.AppendMenuItem( self, menu, 'delete completely', 'Physically delete this file from disk.', self._Delete, CC.TRASH_SERVICE_KEY )
+                ClientGUIMenus.AppendMenuItem( self, menu, 'delete completely', 'Physically delete this file from disk.', self._Delete, file_service_key = CC.TRASH_SERVICE_KEY )
                 ClientGUIMenus.AppendMenuItem( self, menu, 'undelete', 'Take this file out of the trash.', self._Undelete )
                 
             
@@ -3022,6 +2990,8 @@ class CanvasWithHovers( CanvasWithDetails ):
             
             if delta_distance > 0:
                 
+                touchscreen_canvas_drags_unanchor = HG.client_controller.new_options.GetBoolean( 'touchscreen_canvas_drags_unanchor' )
+                
                 if not self._current_drag_is_touch and delta_distance > 50:
                     
                     # if user is able to generate such a large distance, they are almost certainly touching
@@ -3029,11 +2999,12 @@ class CanvasWithHovers( CanvasWithDetails ):
                     self._current_drag_is_touch = True
                     
                 
+                # touch events obviously don't mix with warping well. the touch just warps it back and again and we get a massive delta!
+                
+                touch_anchor_override = touchscreen_canvas_drags_unanchor and self._current_drag_is_touch
                 anchor_and_hide_canvas_drags = HG.client_controller.new_options.GetBoolean( 'anchor_and_hide_canvas_drags' )
                 
-                if HC.PLATFORM_WINDOWS and anchor_and_hide_canvas_drags and not self._current_drag_is_touch:
-                    
-                    # touch events obviously don't mix with warping well. the touch just warps it back and again and we get a massive delta!
+                if anchor_and_hide_canvas_drags and not touch_anchor_override:
                     
                     show_mouse = False
                     
@@ -3109,11 +3080,14 @@ class CanvasWithHovers( CanvasWithDetails ):
     
 class CanvasFilterDuplicates( CanvasWithHovers ):
     
-    def __init__( self, parent, file_service_key ):
+    def __init__( self, parent, file_search_context, both_files_match ):
         
         CanvasWithHovers.__init__( self, parent )
         
-        self._file_service_key = file_service_key
+        self._hover_duplicates = ClientGUIHoverFrames.FullscreenHoverFrameRightDuplicates( self, self, self._canvas_key )
+        
+        self._file_search_context = file_search_context
+        self._both_files_match = both_files_match
         
         self._maintain_pan_and_zoom = True
         
@@ -3124,7 +3098,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         self._processed_pairs = []
         self._hashes_due_to_be_deleted_in_this_batch = set()
         
-        self._media_list = ClientMedia.ListeningMediaList( self._file_service_key, [] )
+        file_service_key = self._file_search_context.GetFileServiceKey()
+        
+        self._media_list = ClientMedia.ListeningMediaList( file_service_key, [] )
         
         self._reserved_shortcut_names.append( 'media_viewer_browser' )
         self._reserved_shortcut_names.append( 'duplicate_filter' )
@@ -3173,7 +3149,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 
             
         
-        HG.client_controller.pub( 'refresh_dupe_numbers' )
+        ClientMedia.hashes_to_jpeg_quality = {} # clear the cache
+        
+        HG.client_controller.pub( 'refresh_dupe_page_numbers' )
         
         CanvasWithHovers._Close( self )
         
@@ -3182,28 +3160,15 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         pair_info = []
         
-        for ( hash_pair, duplicate_type, first_media, second_media, duplicate_action_options, was_auto_skipped ) in self._processed_pairs:
+        for ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs:
             
-            if duplicate_type == HC.DUPLICATE_UNKNOWN:
+            if duplicate_type is None or was_auto_skipped:
                 
                 continue # it was a 'skip' decision
                 
             
             first_hash = first_media.GetHash()
             second_hash = second_media.GetHash()
-            
-            if duplicate_type in ( HC.DUPLICATE_BETTER, HC.DUPLICATE_WORSE, HC.DUPLICATE_LARGER_BETTER, HC.DUPLICATE_SMALLER_BETTER, HC.DUPLICATE_BETTER_OR_WORSE ):
-                
-                file_deletion_reason = 'better/worse'
-                
-            else:
-                
-                file_deletion_reason = HC.duplicate_type_string_lookup[ duplicate_type ]
-                
-            
-            file_deletion_reason = 'Deleted in Duplicate Filter ({}).'.format( file_deletion_reason )
-            
-            service_keys_to_content_updates = duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media, file_deletion_reason = file_deletion_reason )
             
             pair_info.append( ( duplicate_type, first_hash, second_hash, service_keys_to_content_updates ) )
             
@@ -3217,44 +3182,19 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         self._hashes_due_to_be_deleted_in_this_batch = set()
         
     
-    def _CurrentMediaIsBetter( self ):
+    def _CurrentMediaIsBetter( self, delete_second = True ):
         
-        self._ProcessPair( HC.DUPLICATE_BETTER )
+        self._ProcessPair( HC.DUPLICATE_BETTER, delete_second = delete_second )
         
     
-    def _Delete( self, service_key = None ):
+    def _Delete( self, media = None, reason = None, file_service_key = None ):
         
         if self._current_media is None:
             
             return
             
         
-        if service_key is None:
-            
-            locations_manager = self._current_media.GetLocationsManager()
-            
-            if CC.LOCAL_FILE_SERVICE_KEY in locations_manager.GetCurrent():
-                
-                service_key = CC.LOCAL_FILE_SERVICE_KEY
-                
-            elif CC.TRASH_SERVICE_KEY in locations_manager.GetCurrent():
-                
-                service_key = CC.TRASH_SERVICE_KEY
-                
-            else:
-                
-                return
-                
-            
-        
-        if service_key == CC.LOCAL_FILE_SERVICE_KEY:
-            
-            text = 'Send this just this file to the trash, or both?'
-            
-        elif service_key == CC.TRASH_SERVICE_KEY:
-            
-            text = 'Permanently delete just this file, or both?'
-            
+        text = 'Delete just this file, or both?'
         
         yes_tuples = []
         
@@ -3269,22 +3209,35 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 
                 if value == 'current':
                     
-                    hashes = { self._current_media.GetHash() }
+                    media = [ self._current_media ]
                     
-                    reason = 'Deleted manually in Duplicate Filter.'
+                    default_reason = 'Deleted manually in Duplicate Filter.'
                     
                 elif value == 'both':
                     
-                    hashes = { self._current_media.GetHash(), self._media_list.GetNext( self._current_media ).GetHash() }
+                    media = [ self._current_media, self._media_list.GetNext( self._current_media ) ]
                     
-                    reason = 'Deleted manually in Duplicate Filter, along with its potential duplicate.'
+                    default_reason = 'Deleted manually in Duplicate Filter, along with its potential duplicate.'
+                    
+                else:
+                    
+                    return False
                     
                 
-                HG.client_controller.Write( 'content_updates', { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] } )
+            else:
+                
+                return False
                 
             
         
-        self.SetFocus() # annoying bug because of the modal dialog
+        deleted = CanvasWithHovers._Delete( self, media = media, default_reason = default_reason, file_service_key = file_service_key )
+        
+        if deleted:
+            
+            self._SkipPair()
+            
+        
+        return True
         
     
     def _DoCustomAction( self ):
@@ -3294,7 +3247,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             return
             
         
-        duplicate_types = [ HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY, HC.DUPLICATE_ALTERNATE, HC.DUPLICATE_NOT_DUPLICATE ]
+        duplicate_types = [ HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY, HC.DUPLICATE_ALTERNATE, HC.DUPLICATE_FALSE_POSITIVE ]
         
         choice_tuples = [ ( HC.duplicate_type_string_lookup[ duplicate_type ], duplicate_type ) for duplicate_type in duplicate_types ]
         
@@ -3309,48 +3262,73 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         new_options = HG.client_controller.new_options
         
-        duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
-        
-        with ClientGUITopLevelWindows.DialogEdit( self, 'edit duplicate merge options' ) as dlg_2:
+        if duplicate_type in [ HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY ] or ( new_options.GetBoolean( 'advanced_mode' ) and duplicate_type == HC.DUPLICATE_ALTERNATE ):
             
-            panel = ClientGUIScrolledPanelsEdit.EditDuplicateActionOptionsPanel( dlg_2, duplicate_type, duplicate_action_options, for_custom_action = True )
+            duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
             
-            dlg_2.SetPanel( panel )
-            
-            if dlg_2.ShowModal() == wx.ID_OK:
+            with ClientGUITopLevelWindows.DialogEdit( self, 'edit duplicate merge options' ) as dlg_2:
                 
-                duplicate_action_options = panel.GetValue()
+                panel = ClientGUIScrolledPanelsEdit.EditDuplicateActionOptionsPanel( dlg_2, duplicate_type, duplicate_action_options, for_custom_action = True )
                 
-                self._ProcessPair( duplicate_type, duplicate_action_options )
+                dlg_2.SetPanel( panel )
                 
-            
-        
-    
-    def _DrawAdditionalTopMiddleInfo( self, dc, current_y ):
-        
-        if self._current_media is not None:
-            
-            shown_media = self._current_media
-            comparison_media = self._media_list.GetNext( shown_media )
-            
-            if shown_media != comparison_media:
-                
-                ( statements, score ) = ClientMedia.GetDuplicateComparisonStatements( shown_media, comparison_media )
-                
-                ( client_width, client_height ) = self.GetClientSize()
-                
-                for statement in statements:
+                if dlg_2.ShowModal() == wx.ID_OK:
                     
-                    ( width, height ) = dc.GetTextExtent( statement )
+                    duplicate_action_options = panel.GetValue()
                     
-                    dc.DrawText( statement, ( client_width - width ) // 2, current_y )
+                else:
                     
-                    current_y += height + 3
+                    return
                     
                 
             
+        else:
+            
+            duplicate_action_options = None
+            
         
-        return current_y
+        text = 'Delete any of the files?'
+        
+        yes_tuples = []
+        
+        yes_tuples.append( ( 'delete this one', 'delete_first' ) )
+        yes_tuples.append( ( 'delete the other', 'delete_second' ) )
+        yes_tuples.append( ( 'delete both', 'delete_both' ) )
+        
+        delete_first = False
+        delete_second = False
+        delete_both = False
+        
+        with ClientGUIDialogs.DialogYesYesNo( self, text, yes_tuples = yes_tuples, no_label = 'forget it' ) as dlg:
+            
+            if dlg.ShowModal() == wx.ID_YES:
+                
+                value = dlg.GetValue()
+                
+                if value == 'delete_first':
+                    
+                    delete_first = True
+                    
+                elif value == 'delete_second':
+                    
+                    delete_second = True
+                    
+                elif value == 'delete_both':
+                    
+                    delete_both = True
+                    
+                else:
+                    
+                    return
+                    
+                
+            else:
+                
+                return
+                
+            
+        
+        self._ProcessPair( duplicate_type, delete_first = delete_first, delete_second = delete_second, delete_both = delete_both, duplicate_action_options = duplicate_action_options )
         
     
     def _DrawBackgroundDetails( self, dc ):
@@ -3435,7 +3413,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     
     def _GetNumCommittableDecisions( self ):
         
-        return len( [ 1 for ( hash_pair, duplicate_type, first_media, second_media, duplicate_action_options, was_auto_skipped ) in self._processed_pairs if duplicate_type != HC.DUPLICATE_UNKNOWN ] )
+        return len( [ 1 for ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs if duplicate_type is not None ] )
         
     
     def _GoBack( self ):
@@ -3444,13 +3422,13 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             self._unprocessed_pairs.append( self._current_pair )
             
-            ( hash_pair, duplicate_type, first_media, second_media, duplicate_action_options, was_auto_skipped ) = self._processed_pairs.pop()
+            ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
             
             self._unprocessed_pairs.append( hash_pair )
             
             while was_auto_skipped:
                 
-                ( hash_pair, duplicate_type, first_media, second_media, duplicate_action_options, was_auto_skipped ) = self._processed_pairs.pop()
+                ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
                 
                 self._unprocessed_pairs.append( hash_pair )
                 
@@ -3466,9 +3444,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         self._ProcessPair( HC.DUPLICATE_ALTERNATE )
         
     
-    def _MediaAreNotDupes( self ):
+    def _MediaAreFalsePositive( self ):
         
-        self._ProcessPair( HC.DUPLICATE_NOT_DUPLICATE )
+        self._ProcessPair( HC.DUPLICATE_FALSE_POSITIVE )
         
     
     def _MediaAreTheSame( self ):
@@ -3476,7 +3454,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         self._ProcessPair( HC.DUPLICATE_SAME_QUALITY )
         
     
-    def _ProcessPair( self, duplicate_type, duplicate_action_options = None ):
+    def _ProcessPair( self, duplicate_type, delete_first = False, delete_second = False, delete_both = False, duplicate_action_options = None ):
         
         if self._current_media is None:
             
@@ -3485,20 +3463,64 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         if duplicate_action_options is None:
             
-            new_options = HG.client_controller.new_options
+            if duplicate_type in [ HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY ] or ( HG.client_controller.new_options.GetBoolean( 'advanced_mode' ) and duplicate_type == HC.DUPLICATE_ALTERNATE ):
+                
+                new_options = HG.client_controller.new_options
+                
+                duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
+                
+            else:
+                
+                duplicate_action_options = ClientDuplicates.DuplicateActionOptions()
+                
             
-            duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
-            
         
-        other_media = self._media_list.GetNext( self._current_media )
-        
-        deleted_hashes = duplicate_action_options.GetDeletedHashes( self._current_media, other_media )
-        
-        self._hashes_due_to_be_deleted_in_this_batch.update( deleted_hashes )
+        first_media = self._current_media
+        second_media = self._media_list.GetNext( first_media )
         
         was_auto_skipped = False
         
-        self._processed_pairs.append( ( self._current_pair, duplicate_type, self._current_media, other_media, duplicate_action_options, was_auto_skipped ) )
+        if delete_first or delete_second or delete_both:
+            
+            if delete_first or delete_both:
+                
+                self._hashes_due_to_be_deleted_in_this_batch.update( first_media.GetHashes() )
+                
+            
+            if delete_second or delete_both:
+                
+                self._hashes_due_to_be_deleted_in_this_batch.update( second_media.GetHashes() )
+                
+            
+            if duplicate_type in ( HC.DUPLICATE_BETTER, HC.DUPLICATE_WORSE ):
+                
+                file_deletion_reason = 'better/worse'
+                
+                if delete_second:
+                    
+                    file_deletion_reason += ', worse file deleted'
+                    
+                
+            else:
+                
+                file_deletion_reason = HC.duplicate_type_string_lookup[ duplicate_type ]
+                
+            
+            if delete_both:
+                
+                file_deletion_reason += ', both files deleted'
+                
+            
+            file_deletion_reason = 'Deleted in Duplicate Filter ({}).'.format( file_deletion_reason )
+            
+        else:
+            
+            file_deletion_reason = None
+            
+        
+        service_keys_to_content_updates = duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media, delete_first = delete_first, delete_second = delete_second, delete_both = delete_both, file_deletion_reason = file_deletion_reason )
+        
+        self._processed_pairs.append( ( self._current_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) )
         
         self._ShowNewPair()
         
@@ -3526,13 +3548,13 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                     
                 else:
                     
-                    ( hash_pair, duplicate_type, first_media, second_media, duplicate_action_options, was_auto_skipped ) = self._processed_pairs.pop()
+                    ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
                     
                     self._unprocessed_pairs.append( hash_pair )
                     
                     while was_auto_skipped:
                         
-                        ( hash_pair, duplicate_type, first_media, second_media, duplicate_action_options, was_auto_skipped ) = self._processed_pairs.pop()
+                        ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
                         
                         self._unprocessed_pairs.append( hash_pair )
                         
@@ -3542,17 +3564,20 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 
             
         
+        file_service_key = self._file_search_context.GetFileServiceKey()
+        
         if len( self._unprocessed_pairs ) == 0:
             
             self._hashes_due_to_be_deleted_in_this_batch = set()
             self._processed_pairs = [] # just in case someone 'skip'ed everything in the last batch, so this never got cleared above
             
             self.SetMedia( None )
-            self._media_list = ClientMedia.ListeningMediaList( self._file_service_key, [] )
+            
+            self._media_list = ClientMedia.ListeningMediaList( file_service_key, [] )
             
             self._currently_fetching_pairs = True
             
-            HG.client_controller.CallToThread( self.THREADFetchPairs, self._file_service_key )
+            HG.client_controller.CallToThread( self.THREADFetchPairs, self._file_search_context, self._both_files_match )
             
             self._SetDirty()
             
@@ -3586,7 +3611,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 
                 was_auto_skipped = True
                 
-                self._processed_pairs.append( ( potential_pair, HC.DUPLICATE_UNKNOWN, None, None, None, was_auto_skipped ) )
+                self._processed_pairs.append( ( potential_pair, None, None, None, {}, was_auto_skipped ) )
                 
                 if len( self._unprocessed_pairs ) == 0:
                     
@@ -3613,10 +3638,21 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             ( first_media_result, second_media_result ) = HG.client_controller.Read( 'media_results', self._current_pair )
             
+            if not ( first_media_result.GetLocationsManager().IsLocal() and second_media_result.GetLocationsManager().IsLocal() ):
+                
+                wx.MessageBox( 'At least one of the potential files in this pair was not in this client. Likely it was very recently deleted through a different process. Your decisions until now will be saved, and then the duplicate filter will close.' )
+                
+                self._CommitProcessed()
+                
+                self._Close()
+                
+                return
+                
+            
             first_media = ClientMedia.MediaSingleton( first_media_result )
             second_media = ClientMedia.MediaSingleton( second_media_result )
             
-            ( statements, score ) = ClientMedia.GetDuplicateComparisonStatements( first_media, second_media )
+            score = ClientMedia.GetDuplicateComparisonScore( first_media, second_media )
             
             if score > 0:
                 
@@ -3627,7 +3663,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 media_results_with_better_first = ( second_media_result, first_media_result )
                 
             
-            self._media_list = ClientMedia.ListeningMediaList( self._file_service_key, media_results_with_better_first )
+            self._media_list = ClientMedia.ListeningMediaList( file_service_key, media_results_with_better_first )
             
             self.SetMedia( self._media_list.GetFirst() )
             
@@ -3646,7 +3682,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         was_auto_skipped = False
         
-        self._processed_pairs.append( ( self._current_pair, HC.DUPLICATE_UNKNOWN, None, None, None, was_auto_skipped ) )
+        self._processed_pairs.append( ( self._current_pair, None, None, None, {}, was_auto_skipped ) )
         
         self._ShowNewPair()
         
@@ -3686,7 +3722,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     
     def EventCharHook( self, event ):
         
-        if self._CanProcessInput() and not self._FocusIsElsewhere():
+        if self._IShouldCatchShortcutEvent():
             
             ( modifier, key ) = ClientGUIShortcuts.ConvertKeyEventToSimpleTuple( event )
             
@@ -3725,7 +3761,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     
     def EventMouse( self, event ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             if event.ShiftDown():
                 
@@ -3805,9 +3841,13 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             action = data
             
-            if action == 'duplicate_filter_this_is_better':
+            if action == 'duplicate_filter_this_is_better_and_delete_other':
                 
-                self._CurrentMediaIsBetter()
+                self._CurrentMediaIsBetter( delete_second = True )
+                
+            elif action == 'duplicate_filter_this_is_better_but_keep_both':
+                
+                self._CurrentMediaIsBetter( delete_second = False )
                 
             elif action == 'duplicate_filter_exactly_the_same':
                 
@@ -3817,9 +3857,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 
                 self._MediaAreAlternates()
                 
-            elif action == 'duplicate_filter_not_dupes':
+            elif action == 'duplicate_filter_false_positive':
                 
-                self._MediaAreNotDupes()
+                self._MediaAreFalsePositive()
                 
             elif action == 'duplicate_filter_custom_action':
                 
@@ -3906,7 +3946,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
         
     
-    def THREADFetchPairs( self, file_service_key ):
+    def THREADFetchPairs( self, file_search_context, both_files_match ):
         
         def wx_close():
             
@@ -3934,7 +3974,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             self._ShowNewPair()
             
         
-        result = HG.client_controller.Read( 'unique_duplicate_pairs', file_service_key, HC.DUPLICATE_UNKNOWN )
+        result = HG.client_controller.Read( 'duplicate_pairs_for_filtering', file_search_context, both_files_match )
         
         if len( result ) == 0:
             
@@ -4197,7 +4237,7 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
     
     def _Back( self ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             if self._current_media == self._GetFirst():
                 
@@ -4215,7 +4255,7 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
     
     def _Close( self ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             if len( self._kept ) > 0 or len( self._deleted ) > 0:
                 
@@ -4287,12 +4327,19 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
             
         
     
-    def _Delete( self ):
+    def _Delete( self, media = None, reason = None, file_service_key = None ):
+        
+        if self._current_media is None:
+            
+            return False
+            
         
         self._deleted.add( self._current_media )
         
         if self._current_media == self._GetLast(): self._Close()
         else: self._ShowNext()
+        
+        return True
         
     
     def _GenerateHoverTopFrame( self ):
@@ -4351,7 +4398,7 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
     
     def EventCharHook( self, event ):
         
-        if self._CanProcessInput() and not self._FocusIsElsewhere():
+        if self._IShouldCatchShortcutEvent():
             
             ( modifier, key ) = ClientGUIShortcuts.ConvertKeyEventToSimpleTuple( event )
             
@@ -4369,7 +4416,7 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
     
     def EventDelete( self, event ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             self._Delete()
             
@@ -4381,7 +4428,7 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
     
     def EventMouse( self, event ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             if event.ShiftDown():
                 
@@ -4433,7 +4480,7 @@ class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
     
     def EventUndelete( self, event ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             self._Undelete()
             
@@ -4789,7 +4836,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
     
     def EventCharHook( self, event ):
         
-        if self._CanProcessInput() and not self._FocusIsElsewhere():
+        if self._IShouldCatchShortcutEvent():
             
             ( modifier, key ) = ClientGUIShortcuts.ConvertKeyEventToSimpleTuple( event )
             
@@ -4810,7 +4857,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
     
     def EventMouseWheel( self, event ):
         
-        if self._CanProcessInput():
+        if self._IShouldCatchShortcutEvent():
             
             if event.CmdDown():
                 
@@ -4915,11 +4962,11 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
             
             if CC.LOCAL_FILE_SERVICE_KEY in locations_manager.GetCurrent():
                 
-                ClientGUIMenus.AppendMenuItem( self, menu, 'delete', 'Send this file to the trash.', self._Delete, CC.LOCAL_FILE_SERVICE_KEY )
+                ClientGUIMenus.AppendMenuItem( self, menu, 'delete', 'Send this file to the trash.', self._Delete, file_service_key = CC.LOCAL_FILE_SERVICE_KEY )
                 
             elif CC.TRASH_SERVICE_KEY in locations_manager.GetCurrent():
                 
-                ClientGUIMenus.AppendMenuItem( self, menu, 'delete from trash now', 'Delete this file immediately. This cannot be undone.', self._Delete, CC.TRASH_SERVICE_KEY )
+                ClientGUIMenus.AppendMenuItem( self, menu, 'delete from trash now', 'Delete this file immediately. This cannot be undone.', self._Delete, file_service_key = CC.TRASH_SERVICE_KEY )
                 ClientGUIMenus.AppendMenuItem( self, menu, 'undelete', 'Take this file out of the trash, returning it to its original file service.', self._Undelete )
                 
             
@@ -5228,7 +5275,7 @@ class MediaContainer( wx.Window ):
             
             if mime in HC.IMAGES or mime in HC.VIDEO:
                 
-                screen_position = ClientGUICommon.ClientToScreen( self, event.GetPosition() )
+                screen_position = ClientGUIFunctions.ClientToScreen( self, event.GetPosition() )
                 ( x, y ) = self.GetParent().ScreenToClient( screen_position )
                 
                 event.SetX( x )
@@ -5565,10 +5612,9 @@ class EmbedButton( wx.Window ):
         
         if needs_thumb:
             
-            hash = self._media.GetHash()
             mime = self._media.GetMime()
             
-            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( hash, mime )
+            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( self._media )
             
             self._thumbnail_bmp = ClientRendering.GenerateHydrusBitmap( thumbnail_path, mime ).GetWxBitmap()
             
@@ -5596,10 +5642,9 @@ class OpenExternallyPanel( wx.Panel ):
         
         if self._media.GetLocationsManager().IsLocal() and self._media.GetMime() in HC.MIMES_WITH_THUMBNAILS:
             
-            hash = self._media.GetHash()
             mime = self._media.GetMime()
             
-            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( hash, mime )
+            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( self._media )
             
             bmp = ClientRendering.GenerateHydrusBitmap( thumbnail_path, mime ).GetWxBitmap()
             
@@ -5727,7 +5772,7 @@ class StaticImage( wx.Window ):
     
     def EventPropagateMouse( self, event ):
         
-        screen_position = ClientGUICommon.ClientToScreen( self, event.GetPosition() )
+        screen_position = ClientGUIFunctions.ClientToScreen( self, event.GetPosition() )
         ( x, y ) = self.GetParent().ScreenToClient( screen_position )
         
         event.SetX( x )

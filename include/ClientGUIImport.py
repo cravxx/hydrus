@@ -7,6 +7,7 @@ from . import ClientGUIControls
 from . import ClientGUIDialogs
 from . import ClientGUIDialogsQuick
 from . import ClientGUIFileSeedCache
+from . import ClientGUIFunctions
 from . import ClientGUIGallerySeedLog
 from . import ClientGUIListBoxes
 from . import ClientGUIListCtrl
@@ -491,7 +492,7 @@ class FilenameTaggingOptionsPanel( wx.Panel ):
             
             expand_parents = True
             
-            self._tag_box = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._tags_panel, self.EnterTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key )
+            self._tag_box = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._tags_panel, self.EnterTags, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key, show_paste_button = True )
             
             self._tags_paste_button = ClientGUICommon.BetterButton( self._tags_panel, 'paste tags', self._PasteTags )
             
@@ -507,7 +508,7 @@ class FilenameTaggingOptionsPanel( wx.Panel ):
             
             expand_parents = True
             
-            self._single_tag_box = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._single_tags_panel, self.EnterTagsSingle, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key )
+            self._single_tag_box = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self._single_tags_panel, self.EnterTagsSingle, expand_parents, CC.LOCAL_FILE_SERVICE_KEY, service_key, show_paste_button = True )
             
             self.SetSelectedPaths( [] )
             
@@ -626,7 +627,16 @@ class FilenameTaggingOptionsPanel( wx.Panel ):
         
         def _GetTagsFromClipboard( self ):
             
-            text = HG.client_controller.GetClipboardText()
+            try:
+                
+                text = HG.client_controller.GetClipboardText()
+                
+            except HydrusExceptions.DataMissing as e:
+                
+                wx.MessageBox( str( e ) )
+                
+                return
+                
             
             try:
                 
@@ -1858,20 +1868,20 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
             
             if files_paused:
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.play )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.play )
                 
             else:
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.pause )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.pause )
                 
             
             if gallery_paused:
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._gallery_pause_button, CC.GlobalBMPs.play )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._gallery_pause_button, CC.GlobalBMPs.play )
                 
             else:
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._gallery_pause_button, CC.GlobalBMPs.pause )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._gallery_pause_button, CC.GlobalBMPs.pause )
                 
             
             if gallery_paused:
@@ -2139,7 +2149,16 @@ class TagImportOptionsButton( ClientGUICommon.BetterButton ):
     
     def _Paste( self ):
         
-        raw_text = HG.client_controller.GetClipboardText()
+        try:
+            
+            raw_text = HG.client_controller.GetClipboardText()
+            
+        except HydrusExceptions.DataMissing as e:
+            
+            wx.MessageBox( str( e ) )
+            
+            return
+            
         
         try:
             
@@ -2430,11 +2449,11 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
                     file_status = 'pausing, ' + file_status
                     
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.play )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.play )
                 
             else:
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.pause )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._files_pause_button, CC.GlobalBMPs.pause )
                 
             
             self._file_status.SetLabelText( file_status )
@@ -2448,7 +2467,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
                     watcher_status = 'paused'
                     
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._checking_pause_button, CC.GlobalBMPs.play )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._checking_pause_button, CC.GlobalBMPs.play )
                 
             else:
                 
@@ -2464,7 +2483,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
                         
                     
                 
-                ClientGUICommon.SetBitmapButtonBitmap( self._checking_pause_button, CC.GlobalBMPs.pause )
+                ClientGUIFunctions.SetBitmapButtonBitmap( self._checking_pause_button, CC.GlobalBMPs.pause )
                 
             
             self._watcher_status.SetLabelText( watcher_status )

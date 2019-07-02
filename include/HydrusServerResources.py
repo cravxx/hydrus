@@ -253,7 +253,9 @@ def ParseFileArguments( path, decompression_bombs_ok = False ):
             
             bounding_dimensions = HC.SERVER_THUMBNAIL_DIMENSIONS
             
-            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( path, bounding_dimensions, mime )
+            target_resolution = HydrusImageHandling.GetThumbnailResolution( ( width, height ), bounding_dimensions )
+            
+            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( path, target_resolution, mime, duration, num_frames )
             
         except Exception as e:
             
@@ -304,7 +306,12 @@ class HydrusResource( Resource ):
         self._server_version_string = HC.service_string_lookup[ service_type ] + '/' + str( HC.NETWORK_VERSION )
         
     
-    def _callbackCheckRestrictions( self, request ):
+    def _callbackCheckAccountRestrictions( self, request ):
+        
+        return request
+        
+    
+    def _callbackCheckServiceRestrictions( self, request ):
         
         self._domain.CheckValid( request.getClientIP() )
         
@@ -390,10 +397,17 @@ class HydrusResource( Resource ):
         if request.channel is None:
             
             # Connection was lost, it seems.
-            
-            request.finish()
+            # no need for request.finish
             
             return
+            
+        
+        if request.requestHeaders.hasHeader( 'Origin' ):
+            
+            if self._service.SupportsCORS():
+                
+                request.setHeader( 'Access-Control-Allow-Origin', '*' )
+                
             
         
         response_context = request.hydrus_response_context
@@ -674,6 +688,7 @@ class HydrusResource( Resource ):
             
             if self._service.SupportsCORS():
                 
+                request.setHeader( 'Access-Control-Allow-Headers', 'Hydrus-Client-API-Access-Key' )
                 request.setHeader( 'Access-Control-Allow-Origin', '*' )
                 request.setHeader( 'Access-Control-Allow-Methods', allowed_methods_string )
                 
@@ -691,7 +706,7 @@ class HydrusResource( Resource ):
             
         
         # 204 No Content
-        response_context = ResponseContext( 204 )
+        response_context = ResponseContext( 200, mime = HC.TEXT_PLAIN )
         
         return response_context
         
@@ -719,9 +734,11 @@ class HydrusResource( Resource ):
         
         d = defer.Deferred()
         
-        d.addCallback( self._callbackCheckRestrictions )
+        d.addCallback( self._callbackCheckServiceRestrictions )
         
         d.addCallback( self._callbackParseGETArgs )
+        
+        d.addCallback( self._callbackCheckAccountRestrictions )
         
         d.addCallback( self._callbackDoGETJob )
         
@@ -731,9 +748,9 @@ class HydrusResource( Resource ):
         
         d.addErrback( self._errbackHandleEmergencyError, request )
         
-        reactor.callLater( 0, d.callback, request )
-        
         request.notifyFinish().addErrback( self._errbackDisconnected, d )
+        
+        reactor.callLater( 0, d.callback, request )
         
         return NOT_DONE_YET
         
@@ -744,7 +761,7 @@ class HydrusResource( Resource ):
         
         d = defer.Deferred()
         
-        d.addCallback( self._callbackCheckRestrictions )
+        d.addCallback( self._callbackCheckServiceRestrictions )
         
         d.addCallback( self._callbackDoOPTIONSJob )
         
@@ -754,9 +771,9 @@ class HydrusResource( Resource ):
         
         d.addErrback( self._errbackHandleEmergencyError, request )
         
-        reactor.callLater( 0, d.callback, request )
-        
         request.notifyFinish().addErrback( self._errbackDisconnected, d )
+        
+        reactor.callLater( 0, d.callback, request )
         
         return NOT_DONE_YET
         
@@ -767,9 +784,11 @@ class HydrusResource( Resource ):
         
         d = defer.Deferred()
         
-        d.addCallback( self._callbackCheckRestrictions )
+        d.addCallback( self._callbackCheckServiceRestrictions )
         
         d.addCallback( self._callbackParsePOSTArgs )
+        
+        d.addCallback( self._callbackCheckAccountRestrictions )
         
         d.addCallback( self._callbackDoPOSTJob )
         
@@ -779,9 +798,9 @@ class HydrusResource( Resource ):
         
         d.addErrback( self._errbackHandleEmergencyError, request )
         
-        reactor.callLater( 0, d.callback, request )
-        
         request.notifyFinish().addErrback( self._errbackDisconnected, d )
+        
+        reactor.callLater( 0, d.callback, request )
         
         return NOT_DONE_YET
         

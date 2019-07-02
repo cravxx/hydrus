@@ -110,9 +110,9 @@ class TestClientAPI( unittest.TestCase ):
         
         text = str( data, 'utf-8' )
         
-        self.assertIn( 'dialog', text )
-        
         self.assertEqual( response.status, 403 )
+        
+        self.assertIn( 'dialog', text )
         
         # success
         
@@ -122,6 +122,7 @@ class TestClientAPI( unittest.TestCase ):
         permissions_to_set_up.append( ( 'add_files', [ ClientAPI.CLIENT_API_PERMISSION_ADD_FILES ] ) )
         permissions_to_set_up.append( ( 'add_tags', [ ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS ] ) )
         permissions_to_set_up.append( ( 'add_urls', [ ClientAPI.CLIENT_API_PERMISSION_ADD_URLS ] ) )
+        permissions_to_set_up.append( ( 'manage_pages', [ ClientAPI.CLIENT_API_PERMISSION_MANAGE_PAGES ] ) )
         permissions_to_set_up.append( ( 'search_all_files', [ ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES ] ) )
         permissions_to_set_up.append( ( 'search_green_files', [ ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES ] ) )
         
@@ -139,9 +140,9 @@ class TestClientAPI( unittest.TestCase ):
             
             ClientAPI.api_request_dialog_open = False
             
-            self.assertEqual( response.status, 200 )
-            
             response_text = str( data, 'utf-8' )
+            
+            self.assertEqual( response.status, 200 )
             
             response_json = json.loads( response_text )
             
@@ -185,7 +186,7 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 401 )
         
-        # fail
+        # fail header
         
         incorrect_headers = { 'Hydrus-Client-API-Access-Key' : 'abcd' }
         
@@ -197,15 +198,88 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 403 )
         
+        # fail get param
+        
+        connection.request( 'GET', '/verify_access_key?Hydrus-Client-API-Access-Key=abcd' )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 403 )
+        
         # success
         
-        for ( name, api_permissions ) in set_up_permissions.items():
+        def do_good_verify_test( api_permissions, key_hex, key_name ):
+            
+            for request_type in ( 'header', 'get' ):
+                
+                if request_type == 'header':
+                    
+                    headers = { key_name : key_hex }
+                    
+                    connection.request( 'GET', '/verify_access_key', headers = headers )
+                    
+                elif request_type == 'get':
+                    
+                    connection.request( 'GET', '/verify_access_key?{}={}'.format( key_name, key_hex ) )
+                    
+                
+                response = connection.getresponse()
+                
+                data = response.read()
+                
+                text = str( data, 'utf-8' )
+                
+                self.assertEqual( response.status, 200 )
+                
+                body_dict = json.loads( text )
+                
+                self.assertEqual( set( body_dict[ 'basic_permissions' ] ), set( api_permissions.GetBasicPermissions() ) )
+                self.assertEqual( body_dict[ 'human_description' ], api_permissions.ToHumanString() )
+                
+            
+        
+        for api_permissions in set_up_permissions.values():
+            
+            access_key_hex = api_permissions.GetAccessKey().hex()
+            
+            do_good_verify_test( api_permissions, access_key_hex, 'Hydrus-Client-API-Access-Key' )
+            
+        
+        # /session_key
+        
+        # fail header
+        
+        incorrect_headers = { 'Hydrus-Client-API-Session-Key' : 'abcd' }
+        
+        connection.request( 'GET', '/verify_access_key', headers = incorrect_headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 419 )
+        
+        # fail get param
+        
+        connection.request( 'GET', '/verify_access_key?Hydrus-Client-API-Session-Key=abcd' )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 419 )
+        
+        # success
+        
+        for api_permissions in set_up_permissions.values():
             
             access_key_hex = api_permissions.GetAccessKey().hex()
             
             headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
             
-            connection.request( 'GET', '/verify_access_key', headers = headers )
+            connection.request( 'GET', '/session_key', headers = headers )
             
             response = connection.getresponse()
             
@@ -217,9 +291,104 @@ class TestClientAPI( unittest.TestCase ):
             
             self.assertEqual( response.status, 200 )
             
-            self.assertEqual( set( body_dict[ 'basic_permissions' ] ), set( api_permissions.GetBasicPermissions() ) )
-            self.assertEqual( body_dict[ 'human_description' ], api_permissions.ToHumanString() )
+            self.assertIn( 'session_key', body_dict )
             
+            session_key_hex = body_dict[ 'session_key' ]
+            
+            self.assertEqual( len( session_key_hex ), 64 )
+            
+            do_good_verify_test( api_permissions, session_key_hex, 'Hydrus-Client-API-Session-Key' )
+            
+        
+        # test access in POST params
+        
+        # fail
+        
+        headers = { 'Content-Type' : HC.mime_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        hash = os.urandom( 32 )
+        hash_hex = hash.hex()
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_tags/add_tags'
+        
+        body_dict = { 'Hydrus-Client-API-Access-Key' : 'abcd', 'hash' : hash_hex, 'service_names_to_tags' : { 'local tags' : [ 'test', 'test2' ] } }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 403 )
+        
+        body_dict = { 'Hydrus-Client-API-Session-Key' : 'abcd', 'hash' : hash_hex, 'service_names_to_tags' : { 'local tags' : [ 'test', 'test2' ] } }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 419 )
+        
+        # success
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        connection.request( 'GET', '/session_key', headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        body_dict = json.loads( text )
+        
+        session_key_hex = body_dict[ 'session_key' ]
+        
+        headers = { 'Content-Type' : HC.mime_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        hash = os.urandom( 32 )
+        hash_hex = hash.hex()
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_tags/add_tags'
+        
+        body_dict = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'hash' : hash_hex, 'service_names_to_tags' : { 'local tags' : [ 'test', 'test2' ] } }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        body_dict = { 'Hydrus-Client-API-Session-Key' : session_key_hex, 'hash' : hash_hex, 'service_names_to_tags' : { 'local tags' : [ 'test', 'test2' ] } }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
         
         return set_up_permissions
         
@@ -232,7 +401,7 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 204 )
+        self.assertEqual( response.status, 200 )
         
         self.assertEqual( response.getheader( 'Allow' ), 'GET' )
         
@@ -255,7 +424,7 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 204 )
+        self.assertEqual( response.status, 200 )
         
         self.assertEqual( response.getheader( 'Allow' ), 'GET' )
         
@@ -267,9 +436,10 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 204 )
+        self.assertEqual( response.status, 200 )
         
         self.assertEqual( response.getheader( 'Access-Control-Allow-Methods' ), 'GET' )
+        self.assertEqual( response.getheader( 'Access-Control-Allow-Headers' ), 'Hydrus-Client-API-Access-Key' )
         self.assertEqual( response.getheader( 'Access-Control-Allow-Origin' ), '*' )
         
     
@@ -845,18 +1015,18 @@ class TestClientAPI( unittest.TestCase ):
         
         response = connection.getresponse()
         
-        self.assertEqual( response.status, 200 )
-        
         data = response.read()
         
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         response_json = json.loads( text )
         
         self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
         self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, None, False ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, None, None, False ), {} ) ] )
         
         # with name
         
@@ -870,18 +1040,46 @@ class TestClientAPI( unittest.TestCase ):
         
         response = connection.getresponse()
         
-        self.assertEqual( response.status, 200 )
-        
         data = response.read()
         
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         response_json = json.loads( text )
         
         self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
         self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, 'muh /tv/', False ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, 'muh /tv/', None, False ), {} ) ] )
+        
+        # with page_key
+        
+        HG.test_controller.ClearWrites( 'import_url_test' )
+        
+        page_key = os.urandom( 32 )
+        page_key_hex = page_key.hex()
+        
+        request_dict = { 'url' : url, 'destination_page_key' : page_key_hex }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', '/add_urls/add_url', body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        response_json = json.loads( text )
+        
+        self.assertEqual( response_json[ 'human_result_text' ], '"https://8ch.net/tv/res/1846574.html" URL added successfully.' )
+        self.assertEqual( response_json[ 'normalised_url' ], 'https://8ch.net/tv/res/1846574.html' )
+        
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, None, None, page_key, False ), {} ) ] )
         
         # add tags and name, and show destination page
         
@@ -895,11 +1093,11 @@ class TestClientAPI( unittest.TestCase ):
         
         response = connection.getresponse()
         
-        self.assertEqual( response.status, 200 )
-        
         data = response.read()
         
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         response_json = json.loads( text )
         
@@ -908,7 +1106,7 @@ class TestClientAPI( unittest.TestCase ):
         
         service_keys_to_tags = ClientTags.ServiceKeysToTags( { CC.LOCAL_TAG_SERVICE_KEY : set( [ '/tv/ thread' ] ) } )
         
-        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, service_keys_to_tags, 'muh /tv/', True ), {} ) ] )
+        self.assertEqual( HG.test_controller.GetWrite( 'import_url_test' ), [ ( ( url, service_keys_to_tags, 'muh /tv/', None, True ), {} ) ] )
         
         # associate url
         
@@ -1027,6 +1225,35 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( result, expected_result )
         
     
+    def _test_manage_pages( self, connection, set_up_permissions ):
+        
+        api_permissions = set_up_permissions[ 'manage_pages' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/manage_pages/get_pages'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        pages = d[ 'pages' ]
+        
+        self.assertEqual( pages[ 'name' ], 'top pages notebook' )
+        
+    
     def _test_search_files( self, connection, set_up_permissions ):
         
         hash_ids = [ 1, 2, 3, 4, 5, 10 ]
@@ -1081,9 +1308,9 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 200 )
-        
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         d = json.loads( text )
         
@@ -1312,9 +1539,9 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 200 )
-        
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         d = json.loads( text )
         
@@ -1330,9 +1557,9 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 200 )
-        
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         d = json.loads( text )
         
@@ -1356,9 +1583,9 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 200 )
-        
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         d = json.loads( text )
         
@@ -1374,9 +1601,9 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 200 )
-        
         text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
         
         d = json.loads( text )
         
@@ -1600,6 +1827,7 @@ class TestClientAPI( unittest.TestCase ):
         self._test_add_files( connection, set_up_permissions )
         self._test_add_tags( connection, set_up_permissions )
         self._test_add_urls( connection, set_up_permissions )
+        self._test_manage_pages( connection, set_up_permissions )
         self._test_search_files( connection, set_up_permissions )
         self._test_permission_failures( connection, set_up_permissions )
         self._test_cors_fails( connection )

@@ -2,6 +2,7 @@ from . import ClientCaches
 from . import ClientConstants as CC
 from . import ClientData
 from . import ClientGUICommon
+from . import ClientGUIFunctions
 from . import ClientGUIMenus
 from . import ClientGUIShortcuts
 from . import ClientGUITopLevelWindows
@@ -57,7 +58,7 @@ class AddEditDeleteListBox( wx.Panel ):
         
         #
         
-        ( width, height ) = ClientGUICommon.ConvertTextToPixels( self._listbox, ( 20, height_num_chars ) )
+        ( width, height ) = ClientGUIFunctions.ConvertTextToPixels( self._listbox, ( 20, height_num_chars ) )
         
         self._listbox.SetInitialSize( ( width, height ) )
         
@@ -289,7 +290,16 @@ class AddEditDeleteListBox( wx.Panel ):
     
     def _ImportFromClipboard( self ):
         
-        raw_text = HG.client_controller.GetClipboardText()
+        try:
+            
+            raw_text = HG.client_controller.GetClipboardText()
+            
+        except HydrusExceptions.DataMissing as e:
+            
+            wx.MessageBox( str( e ) )
+            
+            return
+            
         
         try:
             
@@ -583,7 +593,7 @@ class QueueListBox( wx.Panel ):
         
         #
         
-        ( width, height ) = ClientGUICommon.ConvertTextToPixels( self._listbox, ( 20, height_num_chars ) )
+        ( width, height ) = ClientGUIFunctions.ConvertTextToPixels( self._listbox, ( 20, height_num_chars ) )
         
         self._listbox.SetInitialSize( ( width, height ) )
         
@@ -844,7 +854,7 @@ class ListBox( wx.ScrolledWindow ):
         
         self.SetScrollRate( 0, self._text_y )
         
-        ( min_width, min_height ) = ClientGUICommon.ConvertTextToPixels( self, ( 16, height_num_chars ) )
+        ( min_width, min_height ) = ClientGUIFunctions.ConvertTextToPixels( self, ( 16, height_num_chars ) )
         
         self.SetMinClientSize( ( min_width, min_height ) )
         
@@ -1312,7 +1322,7 @@ class ListBox( wx.ScrolledWindow ):
         
         key_code = event.GetKeyCode()
         
-        if ClientGUICommon.WindowHasFocus( self ) and key_code in CC.DELETE_KEYS:
+        if ClientGUIFunctions.WindowHasFocus( self ) and key_code in CC.DELETE_KEYS:
             
             self._DeleteActivate()
             
@@ -3142,11 +3152,11 @@ class ListBoxTagsSelectionTagsDialog( ListBoxTagsSelection ):
     
     render_for_user = False
     
-    def __init__( self, parent, add_func, delete_func ):
+    def __init__( self, parent, enter_func, delete_func ):
         
         ListBoxTagsSelection.__init__( self, parent, include_counts = True, collapse_siblings = False )
         
-        self._add_func = add_func
+        self._enter_func = enter_func
         self._delete_func = delete_func
         
     
@@ -3154,7 +3164,7 @@ class ListBoxTagsSelectionTagsDialog( ListBoxTagsSelection ):
         
         if len( self._selected_terms ) > 0:
             
-            self._add_func( set( self._selected_terms ) )
+            self._enter_func( set( self._selected_terms ) )
             
         
     
