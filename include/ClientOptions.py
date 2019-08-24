@@ -133,6 +133,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'watch_clipboard_for_watcher_urls' ] = False
         self._dictionary[ 'booleans' ][ 'watch_clipboard_for_other_recognised_urls' ] = False
         
+        self._dictionary[ 'booleans' ][ 'autocomplete_results_fetch_automatically' ] = True
+        
         #
         
         self._dictionary[ 'colours' ] = HydrusSerialisable.SerialisableDictionary()
@@ -280,6 +282,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'noneable_integers' ][ 'file_viewing_statistics_preview_min_time' ] = 5
         self._dictionary[ 'noneable_integers' ][ 'file_viewing_statistics_preview_max_time' ] = 60
         
+        self._dictionary[ 'noneable_integers' ][ 'autocomplete_exact_match_threshold' ] = 2
+        
         #
         
         self._dictionary[ 'simple_downloader_formulae' ] = HydrusSerialisable.SerialisableList()
@@ -308,6 +312,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'strings' ][ 'pause_character' ] = '\u23F8'
         self._dictionary[ 'strings' ][ 'stop_character' ] = '\u23F9'
         self._dictionary[ 'strings' ][ 'default_gug_name' ] = 'safebooru tag search'
+        self._dictionary[ 'strings' ][ 'has_audio_label' ] = '\U0001F50A'
         
         self._dictionary[ 'string_list' ] = {}
         
@@ -512,6 +517,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'default_sort' ] = ClientMedia.MediaSort( ( 'system', CC.SORT_FILES_BY_FILESIZE ), CC.SORT_ASC )
         self._dictionary[ 'fallback_sort' ] = ClientMedia.MediaSort( ( 'system', CC.SORT_FILES_BY_IMPORT_TIME ), CC.SORT_ASC )
         
+        self._dictionary[ 'default_collect' ] = ClientMedia.MediaCollect()
+        
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
@@ -663,6 +670,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def GetDefaultCollect( self ):
+        
+        with self._lock:
+            
+            return self._dictionary[ 'default_collect' ]
+            
+        
+    
     def GetColour( self, colour_type, colourset = None ):
         
         with self._lock:
@@ -686,14 +701,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def GetDefaultWatcherCheckerOptions( self ):
-        
-        with self._lock:
-            
-            return self._dictionary[ 'misc' ][ 'default_thread_watcher_options' ]
-            
-        
-    
     def GetDefaultSort( self ):
         
         with self._lock:
@@ -707,6 +714,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             return self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ]
+            
+        
+    
+    def GetDefaultWatcherCheckerOptions( self ):
+        
+        with self._lock:
+            
+            return self._dictionary[ 'misc' ][ 'default_thread_watcher_options' ]
             
         
     
@@ -935,6 +950,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def SetDefaultCollect( self, media_collect ):
+        
+        with self._lock:
+            
+            self._dictionary[ 'default_collect' ] = media_collect
+            
+        
+    
     def SetColour( self, colour_type, colourset, colour ):
         
         with self._lock:
@@ -952,14 +975,6 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def SetDefaultWatcherCheckerOptions( self, checker_options ):
-        
-        with self._lock:
-            
-            self._dictionary[ 'misc' ][ 'default_thread_watcher_options' ] = checker_options
-            
-        
-    
     def SetDefaultSort( self, media_sort ):
         
         with self._lock:
@@ -973,6 +988,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ] = checker_options
+            
+        
+    
+    def SetDefaultWatcherCheckerOptions( self, checker_options ):
+        
+        with self._lock:
+            
+            self._dictionary[ 'misc' ][ 'default_thread_watcher_options' ] = checker_options
             
         
     

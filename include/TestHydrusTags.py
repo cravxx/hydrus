@@ -460,7 +460,13 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces(), [ ( p.ToString(), p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_HASH, ( bytes.fromhex( 'abcd' ), 'sha256' ) )
+        p = ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_HAS_AUDIO, True )
+        
+        self.assertEqual( p.ToString(), 'system:has audio' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces(), [ ( p.ToString(), p.GetNamespace() ) ] )
+        
+        p = ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_HASH, ( ( bytes.fromhex( 'abcd' ), ), 'sha256' ) )
         
         self.assertEqual( p.ToString(), 'system:sha256 hash is abcd' )
         self.assertEqual( p.GetNamespace(), 'system' )
@@ -538,15 +544,15 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces(), [ ( p.ToString(), p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ( bytes.fromhex( 'abcd' ), 5 ) )
+        p = ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ( ( bytes.fromhex( 'abcd' ), ), 5 ) )
         
-        self.assertEqual( p.ToString(), 'system:similar to abcd using max hamming of 5' )
+        self.assertEqual( p.ToString(), 'system:similar to 1 files using max hamming of 5' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces(), [ ( p.ToString(), p.GetNamespace() ) ] )
         
         p = ClientSearch.Predicate( HC.PREDICATE_TYPE_SYSTEM_SIZE, ( '>', 5, 1048576 ) )
         
-        self.assertEqual( p.ToString(), 'system:size > 5MB' )
+        self.assertEqual( p.ToString(), 'system:filesize > 5MB' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces(), [ ( p.ToString(), p.GetNamespace() ) ] )
         

@@ -21,6 +21,7 @@ from . import HydrusSerialisable
 import itertools
 
 hashes_to_jpeg_quality = {}
+hashes_to_pixel_hashes = {}
 
 def FlattenMedia( media_list ):
     
@@ -48,6 +49,25 @@ def GetDuplicateComparisonScore( shown_media, comparison_media ):
     
     return total_score
     
+NICE_RESOLUTIONS = {}
+
+NICE_RESOLUTIONS[ ( 640, 480 ) ] = '480p'
+NICE_RESOLUTIONS[ ( 1280, 720 ) ] = '720p'
+NICE_RESOLUTIONS[ ( 1920, 1080 ) ] = '1080p'
+NICE_RESOLUTIONS[ ( 3840, 2060 ) ] = '4k'
+
+NICE_RATIOS = {}
+
+NICE_RATIOS[ 1 ] = '1:1'
+NICE_RATIOS[ 4 / 3 ] = '4:3'
+NICE_RATIOS[ 5 / 4 ] = '5:4'
+NICE_RATIOS[ 16 / 9 ] = '16:9'
+NICE_RATIOS[ 21 / 9 ] = '21:9'
+NICE_RATIOS[ 47 / 20 ] = '2.35:1'
+NICE_RATIOS[ 9 / 16 ] = '9:16'
+NICE_RATIOS[ 2 / 3 ] = '2:3'
+NICE_RATIOS[ 4 / 5 ] = '4:5'
+
 def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
     new_options = HG.client_controller.new_options
@@ -64,6 +84,12 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     #
     
     statements_and_scores = {}
+    
+    s_hash = shown_media.GetHash()
+    c_hash = comparison_media.GetHash()
+    
+    s_mime = shown_media.GetMime()
+    c_mime = comparison_media.GetMime()
     
     # size
     
@@ -112,8 +138,11 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
     if s_resolution is not None and c_resolution is not None and s_resolution != c_resolution:
         
-        ( s_w, s_h ) = shown_media.GetResolution()
-        ( c_w, c_h ) = comparison_media.GetResolution()
+        s_res = shown_media.GetResolution()
+        c_res = comparison_media.GetResolution()
+        
+        ( s_w, s_h ) = s_res
+        ( c_w, c_h ) = c_res
         
         resolution_ratio = ( s_w * s_h ) / ( c_w * c_h )
         
@@ -143,15 +172,97 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
             score = -duplicate_comparison_score_higher_resolution
             
         
-        statement = '{} {} {}'.format( HydrusData.ConvertResolutionToPrettyString( s_resolution ), operator, HydrusData.ConvertResolutionToPrettyString( c_resolution ) )
+        if s_res in NICE_RESOLUTIONS:
+            
+            s_string = NICE_RESOLUTIONS[ s_res ]
+            
+        else:
+            
+            s_string = HydrusData.ConvertResolutionToPrettyString( s_resolution )
+            
+            if s_w % 2 == 1 or s_h % 2 == 1:
+                
+                s_string += ' (unusual)'
+                
+            
+        
+        if c_res in NICE_RESOLUTIONS:
+            
+            c_string = NICE_RESOLUTIONS[ c_res ]
+            
+        else:
+            
+            c_string = HydrusData.ConvertResolutionToPrettyString( c_resolution )
+            
+            if c_w % 2 == 1 or c_h % 2 == 1:
+                
+                c_string += ' (unusual)'
+                
+            
+        
+        statement = '{} {} {}'.format( s_string, operator, c_string )
         
         statements_and_scores[ 'resolution' ] = ( statement, score )
         
+        #
+        
+        s_ratio = s_w / s_h
+        c_ratio = c_w / c_h
+        
+        s_nice = s_ratio in NICE_RATIOS
+        c_nice = c_ratio in NICE_RATIOS
+        
+        if s_nice or c_nice:
+            
+            if s_nice:
+                
+                s_string = NICE_RATIOS[ s_ratio ]
+                
+            else:
+                
+                s_string = 'unusual'
+                
+            
+            if c_nice:
+                
+                c_string = NICE_RATIOS[ c_ratio ]
+                
+            else:
+                
+                c_string = 'unusual'
+                
+            
+            if s_nice and c_nice:
+                
+                operator = '-'
+                score = 0
+                
+            elif s_nice:
+                
+                operator = '>'
+                score = 10
+                
+            elif c_nice:
+                
+                operator = '<'
+                score = -10
+                
+            
+            if s_string == c_string:
+                
+                statement = 'both {}'.format( s_string )
+                
+            else:
+                
+                statement = '{} {} {}'.format( s_string, operator, c_string )
+                
+            
+            statements_and_scores[ 'ratio' ] = ( statement, score )
+            
+            
+        
     
     # same/diff mime
-    
-    s_mime = shown_media.GetMime()
-    c_mime = comparison_media.GetMime()
     
     if s_mime != c_mime:
         
@@ -222,13 +333,7 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
         statements_and_scores[ 'time_imported' ] = ( statement, score )
         
     
-    s_mime = shown_media.GetMime()
-    c_mime = comparison_media.GetMime()
-    
     if s_mime == HC.IMAGE_JPEG and c_mime == HC.IMAGE_JPEG:
-        
-        s_hash = shown_media.GetHash()
-        c_hash = comparison_media.GetHash()
         
         global hashes_to_jpeg_quality
         
@@ -283,6 +388,52 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
             statement = '{} vs {} jpeg quality'.format( s_label, c_label )
             
             statements_and_scores[ 'jpeg_quality' ] = ( statement, score )
+            
+        
+    
+    if shown_media.IsStaticImage() and comparison_media.IsStaticImage() and shown_media.GetResolution() == comparison_media.GetResolution():
+        
+        global hashes_to_pixel_hashes
+        
+        if s_hash not in hashes_to_pixel_hashes:
+            
+            path = HG.client_controller.client_files_manager.GetFilePath( s_hash, s_mime )
+            
+            hashes_to_pixel_hashes[ s_hash ] = HydrusImageHandling.GetImagePixelHash( path, s_mime )
+            
+        
+        if c_hash not in hashes_to_pixel_hashes:
+            
+            path = HG.client_controller.client_files_manager.GetFilePath( c_hash, c_mime )
+            
+            hashes_to_pixel_hashes[ c_hash ] = HydrusImageHandling.GetImagePixelHash( path, c_mime )
+            
+        
+        s_pixel_hash = hashes_to_pixel_hashes[ s_hash ]
+        c_pixel_hash = hashes_to_pixel_hashes[ c_hash ]
+        
+        if s_pixel_hash == c_pixel_hash:
+            
+            if s_mime == HC.IMAGE_PNG and c_mime != HC.IMAGE_PNG:
+                
+                statement = 'this is a pixel-for-pixel duplicate png!'
+                
+                score = -100
+                
+            elif s_mime != HC.IMAGE_PNG and c_mime == HC.IMAGE_PNG:
+                
+                statement = 'other file is a pixel-for-pixel duplicate png!'
+                
+                score = 100
+                
+            else:
+                
+                statement = 'images are pixel-for-pixel duplicates!'
+                
+                score = 0
+                
+            
+            statements_and_scores[ 'pixel_duplicates' ] = ( statement, score )
             
         
     
@@ -351,7 +502,7 @@ class DuplicatesManager( object ):
     
 class FileInfoManager( object ):
     
-    def __init__( self, hash_id, hash, size = None, mime = None, width = None, height = None, duration = None, num_frames = None, num_words = None ):
+    def __init__( self, hash_id, hash, size = None, mime = None, width = None, height = None, duration = None, num_frames = None, has_audio = None, num_words = None ):
         
         if mime is None:
             
@@ -366,17 +517,18 @@ class FileInfoManager( object ):
         self.height = height
         self.duration = duration
         self.num_frames = num_frames
+        self.has_audio = has_audio
         self.num_words = num_words
         
     
     def Duplicate( self ):
         
-        return FileInfoManager( self.hash_id, self.hash, self.size, self.mime, self.width, self.height, self.duration, self.num_frames, self.num_words )
+        return FileInfoManager( self.hash_id, self.hash, self.size, self.mime, self.width, self.height, self.duration, self.num_frames, self.has_audio, self.num_words )
         
     
     def ToTuple( self ):
         
-        return ( self.hash_id, self.hash, self.size, self.mime, self.width, self.height, self.duration, self.num_frames, self.num_words )
+        return ( self.hash_id, self.hash, self.size, self.mime, self.width, self.height, self.duration, self.num_frames, self.has_audio, self.num_words )
         
     
 class FileViewingStatsManager( object ):
@@ -628,6 +780,8 @@ class LocationsManager( object ):
                         
                         self._current.add( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
                         
+                        self._deleted.discard( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
+                        
                         self._current_to_timestamps[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = HydrusData.GetNow()
                         
                     
@@ -652,6 +806,7 @@ class LocationsManager( object ):
                     self._inbox = False
                     
                     self._current.discard( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
+                    self._deleted.add( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
                     
                 
             elif action == HC.CONTENT_UPDATE_UNDELETE:
@@ -726,6 +881,55 @@ class Media( object ):
     
     def __ne__( self, other ): return self.__hash__() != other.__hash__()
     
+class MediaCollect( HydrusSerialisable.SerialisableBase ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_MEDIA_COLLECT
+    SERIALISABLE_NAME = 'Media Collect'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, namespaces = None, rating_service_keys = None, collect_unmatched = None ):
+        
+        if namespaces is None:
+            
+            namespaces = []
+            
+        
+        if rating_service_keys is None:
+            
+            rating_service_keys = []
+            
+        
+        if collect_unmatched is None:
+            
+            collect_unmatched = True
+            
+        
+        self.namespaces = namespaces
+        self.rating_service_keys = rating_service_keys
+        self.collect_unmatched = collect_unmatched
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        serialisable_rating_service_keys = [ key.hex() for key in self.rating_service_keys ]
+        
+        return ( self.namespaces, serialisable_rating_service_keys, self.collect_unmatched )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( self.namespaces, serialisable_rating_service_keys, self.collect_unmatched ) = serialisable_info
+        
+        self.rating_service_keys = [ bytes.fromhex( serialisable_key ) for serialisable_key in serialisable_rating_service_keys ]
+        
+    
+    def DoesACollect( self ):
+        
+        return len( self.namespaces ) > 0 or len( self.rating_service_keys ) > 0
+        
+    
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_MEDIA_COLLECT ] = MediaCollect
+
 class MediaList( object ):
     
     def __init__( self, file_service_key, media_results ):
@@ -738,10 +942,7 @@ class MediaList( object ):
         self._hashes_to_collected_media = {}
         
         self._media_sort = MediaSort( ( 'system', CC.SORT_FILES_BY_FILESIZE ), CC.SORT_ASC )
-        self._collect_by = []
-        
-        self._collect_map_singletons = {}
-        self._collect_map_collected = {}
+        self._media_collect = MediaCollect()
         
         self._sorted_media = SortedList( [ self._GenerateMediaSingleton( media_result ) for media_result in media_results ] )
         
@@ -756,12 +957,12 @@ class MediaList( object ):
         return len( self._singleton_media ) + sum( map( len, self._collected_media ) )
         
     
-    def _CalculateCollectionKeysToMedias( self, collect_by, medias ):
+    def _CalculateCollectionKeysToMedias( self, media_collect, medias ):
         
         keys_to_medias = collections.defaultdict( list )
         
-        namespaces_to_collect_by = [ data for ( collect_by_type, data ) in collect_by if collect_by_type == 'namespace' ]
-        ratings_to_collect_by = [ bytes.fromhex( data ) for ( collect_by_type, data ) in collect_by if collect_by_type == 'rating' ]
+        namespaces_to_collect_by = list( media_collect.namespaces )
+        ratings_to_collect_by = list( media_collect.rating_service_keys )
         
         services_manager = HG.client_controller.services_manager
         
@@ -773,7 +974,7 @@ class MediaList( object ):
                 
             else:
                 
-                namespace_key = None
+                namespace_key = frozenset()
                 
             
             if len( ratings_to_collect_by ) > 0:
@@ -782,7 +983,7 @@ class MediaList( object ):
                 
             else:
                 
-                rating_key = None
+                rating_key = frozenset()
                 
             
             keys_to_medias[ ( namespace_key, rating_key ) ].append( media )
@@ -938,139 +1139,84 @@ class MediaList( object ):
         self._singleton_media.difference_update( singleton_media )
         self._collected_media.difference_update( collected_media )
         
-        keys_to_remove = [ key for ( key, media ) in self._collect_map_singletons if media in singleton_media ]
-        
-        for key in keys_to_remove:
-            
-            del self._collect_map_singletons[ key ]
-            
-        
-        keys_to_remove = [ key for ( key, media ) in self._collect_map_collected if media in collected_media ]
-        
-        for key in keys_to_remove:
-            
-            del self._collect_map_collected[ key ]
-            
-        
         self._sorted_media.remove_items( singleton_media.union( collected_media ) )
         
         self._RecalcHashes()
         
     
-    def AddMedia( self, new_media, append = True ):
+    def AddMedia( self, new_media ):
         
-        if append:
+        new_media = FlattenMedia( new_media )
+        
+        addable_media = []
+        
+        for media in new_media:
             
-            for media in new_media:
-                
-                hash = media.GetHash()
-                
-                self._hashes.add( hash )
-                
-                self._hashes_to_singleton_media[ hash ] = media
-                
+            hash = media.GetHash()
             
-            self._singleton_media.update( new_media )
-            self._sorted_media.append_items( new_media )
-            
-        else:
-            
-            if self._collect_by is not None:
+            if hash in self._hashes:
                 
-                keys_to_medias = self._CalculateCollectionKeysToMedias( self._collect_by, new_media )
-                
-                new_media = []
-                
-                for ( key, medias ) in list(keys_to_medias.items()):
-                    
-                    if key in self._collect_map_singletons:
-                        
-                        singleton_media = self._collect_map_singletons[ key ]
-                        
-                        self._sorted_media.remove_items( singleton_media )
-                        self._singleton_media.discard( singleton_media )
-                        del self._collect_map_singletons[ key ]
-                        
-                        medias.append( singleton_media )
-                        
-                        collected_media = self._GenerateMediaCollection( [ media.GetMediaResult() for media in medias ] )
-                        
-                        collected_media.Sort( self._media_sort )
-                        
-                        self._collected_media.add( collected_media )
-                        self._collect_map_collected[ key ] = collected_media
-                        
-                        new_media.append( collected_media )
-                        
-                    elif key in self._collect_map_collected:
-                        
-                        collected_media = self._collect_map_collected[ key ]
-                        
-                        self._sorted_media.remove_items( collected_media )
-                        
-                        collected_media.AddMedia( medias )
-                        
-                        collected_media.Sort( self._media_sort )
-                        
-                        new_media.append( collected_media )
-                        
-                    elif len( medias ) == 1:
-                        
-                        ( singleton_media, ) = medias
-                        
-                        self._singleton_media.add( singleton_media )
-                        self._collect_map_singletons[ key ] = singleton_media
-                        
-                    else:
-                        
-                        collected_media = self._GenerateMediaCollection( [ media.GetMediaResult() for media in medias ] )
-                        
-                        collected_media.Sort( self._media_sort )
-                        
-                        self._collected_media.add( collected_media )
-                        self._collect_map_collected[ key ] = collected_media
-                        
-                        new_media.append( collected_media )
-                        
-                    
+                continue
                 
             
-            self._sorted_media.insert_items( new_media )
+            addable_media.append( media )
             
-            self._RecalcHashes()
+            self._hashes.add( hash )
             
+            self._hashes_to_singleton_media[ hash ] = media
+            
+        
+        self._singleton_media.update( addable_media )
+        self._sorted_media.append_items( addable_media )
         
         return new_media
         
     
-    def Collect( self, collect_by = None ):
+    def Collect( self, media_collect = None ):
         
-        if collect_by == None:
+        if media_collect == None:
             
-            collect_by = self._collect_by
+            media_collect = self._media_collect
             
         
-        self._collect_by = collect_by
+        self._media_collect = media_collect
+        
+        flat_media = list( self._singleton_media )
         
         for media in self._collected_media:
             
-            self._singleton_media.update( [ self._GenerateMediaSingleton( media_result ) for media_result in media.GenerateMediaResults() ] )
+            flat_media.extend( [ self._GenerateMediaSingleton( media_result ) for media_result in media.GenerateMediaResults() ] )
             
         
-        self._collected_media = set()
-        
-        self._collect_map_singletons = {}
-        self._collect_map_collected = {}
-        
-        if len( collect_by ) > 0:
+        if self._media_collect.DoesACollect():
             
-            keys_to_medias = self._CalculateCollectionKeysToMedias( collect_by, self._singleton_media )
+            keys_to_medias = self._CalculateCollectionKeysToMedias( media_collect, flat_media )
             
-            self._collect_map_singletons = { key : medias[0] for ( key, medias ) in list(keys_to_medias.items()) if len( medias ) == 1 }
-            self._collect_map_collected = { key : self._GenerateMediaCollection( [ media.GetMediaResult() for media in medias ] ) for ( key, medias ) in list(keys_to_medias.items()) if len( medias ) > 1 }
+            # add an option here I think, to media_collect to say if collections with one item should be singletons or not
             
-            self._singleton_media = set( self._collect_map_singletons.values() )
-            self._collected_media = set( self._collect_map_collected.values() )
+            self._singleton_media = set()#{ medias[0] for ( key, medias ) in keys_to_medias.items() if len( medias ) == 1 }
+            
+            if not self._media_collect.collect_unmatched:
+                
+                unmatched_key = ( frozenset(), frozenset() )
+                
+                if unmatched_key in keys_to_medias:
+                    
+                    unmatched_medias = keys_to_medias[ unmatched_key ]
+                    
+                    self._singleton_media.update( unmatched_medias )
+                    
+                    del keys_to_medias[ unmatched_key ]
+                    
+                
+            
+            self._collected_media = { self._GenerateMediaCollection( [ media.GetMediaResult() for media in medias ] ) for ( key, medias ) in keys_to_medias.items() }# if len( medias ) > 1 }
+            
+        else:
+            
+            self._singleton_media = set( flat_media )
+            
+            self._collected_media = set()
             
         
         self._sorted_media = SortedList( list( self._singleton_media ) + list( self._collected_media ) )
@@ -1080,7 +1226,10 @@ class MediaList( object ):
     
     def DeletePending( self, service_key ):
         
-        for media in self._collected_media: media.DeletePending( service_key )
+        for media in self._collected_media:
+            
+            media.DeletePending( service_key )
+            
         
     
     def GenerateMediaResults( self, has_location = None, discriminant = None, selected_media = None, unrated = None, for_media_viewer = False ):
@@ -1174,6 +1323,22 @@ class MediaList( object ):
             
         
         return media_results
+        
+    
+    def GetAPIInfoDict( self, simple ):
+        
+        d = {}
+        
+        d[ 'num_files' ] = self.GetNumFiles()
+        
+        if not simple:
+            
+            hashes = self.GetHashes( ordered = True )
+            
+            d[ 'hashes' ] = [ hash.hex() for hash in hashes ]
+            
+        
+        return d
         
     
     def GetFirst( self ):
@@ -1414,7 +1579,7 @@ class ListeningMediaList( MediaList ):
         HG.client_controller.sub( self, 'ProcessServiceUpdates', 'service_updates_gui' )
         
     
-    def AddMediaResults( self, media_results, append = True ):
+    def AddMediaResults( self, media_results ):
         
         new_media = []
         
@@ -1430,7 +1595,7 @@ class ListeningMediaList( MediaList ):
             new_media.append( self._GenerateMediaSingleton( media_result ) )
             
         
-        self.AddMedia( new_media, append = append )
+        self.AddMedia( new_media )
         
         return new_media
         
@@ -1516,9 +1681,9 @@ class MediaCollection( MediaList, Media ):
         self._file_viewing_stats_manager = FileViewingStatsManager( preview_views, preview_viewtime, media_views, media_viewtime )
         
     
-    def AddMedia( self, new_media, append = True ):
+    def AddMedia( self, new_media ):
         
-        MediaList.AddMedia( self, new_media, append = True )
+        MediaList.AddMedia( self, new_media )
         
         self._RecalcInternals()
         
@@ -1625,8 +1790,6 @@ class MediaCollection( MediaList, Media ):
     def IsCollection( self ): return True
     
     def IsImage( self ): return False
-    
-    def IsNoisy( self ): return self.GetDisplayMedia().GetMime() in HC.NOISY_MIMES
     
     def IsSizeDefinite( self ): return self._size_definite
     
@@ -1742,7 +1905,7 @@ class MediaSingleton( Media ):
         file_info_manager = self._media_result.GetFileInfoManager()
         locations_manager = self._media_result.GetLocationsManager()
         
-        ( hash_id, hash, size, mime, width, height, duration, num_frames, num_words ) = file_info_manager.ToTuple()
+        ( hash_id, hash, size, mime, width, height, duration, num_frames, has_audio, num_words ) = file_info_manager.ToTuple()
         
         info_string = HydrusData.ToHumanBytes( size ) + ' ' + HC.mime_string_lookup[ mime ]
         
@@ -1751,6 +1914,11 @@ class MediaSingleton( Media ):
         if duration is not None: info_string += ', ' + HydrusData.ConvertMillisecondsToPrettyTime( duration )
         
         if num_frames is not None: info_string += ' (' + HydrusData.ToHumanInt( num_frames ) + ' frames)'
+        
+        if has_audio:
+            
+            info_string += ', {}'.format( HG.client_controller.new_options.GetString( 'has_audio_label' ) )
+            
         
         if num_words is not None: info_string += ' (' + HydrusData.ToHumanInt( num_words ) + ' words)'
         
@@ -1863,7 +2031,15 @@ class MediaSingleton( Media ):
         return self._media_result.GetHash() in hashes
         
     
-    def HasArchive( self ): return not self._media_result.GetInbox()
+    def HasArchive( self ):
+        
+        return not self._media_result.GetInbox()
+        
+    
+    def HasAudio( self ):
+        
+        return self._media_result.HasAudio()
+        
     
     def HasDuration( self ):
         
@@ -1898,9 +2074,12 @@ class MediaSingleton( Media ):
         return self._media_result.GetMime() in HC.IMAGES and not self.HasDuration()
         
     
-    def IsNoisy( self ): return self._media_result.GetMime() in HC.NOISY_MIMES
-    
     def IsSizeDefinite( self ): return self._media_result.GetSize() is not None
+    
+    def IsStaticImage( self ):
+        
+        return self._media_result.IsStaticImage()
+        
     
     def MatchesDiscriminant( self, has_location = None, discriminant = None, not_uploaded_to = None ):
         
@@ -1966,7 +2145,14 @@ class MediaSingleton( Media ):
     
     def RefreshFileInfo( self ):
         
-        self._media_result.RefreshFileInfo()
+        media_results = HG.client_controller.Read( 'media_results', ( self._media_result.GetHash(), ) )
+        
+        if len( media_results ) > 0:
+            
+            media_result = media_results[0]
+            
+            self._media_result = media_result
+            
         
     
 class MediaResult( object ):
@@ -2077,6 +2263,16 @@ class MediaResult( object ):
         return self._tags_manager
         
     
+    def HasAudio( self ):
+        
+        return self._file_info_manager.has_audio is True
+        
+    
+    def IsStaticImage( self ):
+        
+        return self._file_info_manager.mime in HC.IMAGES and self._file_info_manager.duration in ( None, 0 )
+        
+    
     def ProcessContentUpdate( self, service_key, content_update ):
         
         try:
@@ -2108,18 +2304,6 @@ class MediaResult( object ):
         elif service_type in HC.RATINGS_SERVICES:
             
             self._ratings_manager.ProcessContentUpdate( service_key, content_update )
-            
-        
-    
-    def RefreshFileInfo( self ):
-        
-        media_results = HG.client_controller.Read( 'media_results', ( self._file_info_manager.hash, ) )
-        
-        if len( media_results ) > 0:
-            
-            media_result = media_results[0]
-            
-            self._file_info_manager = media_result._file_info_manager
             
         
     

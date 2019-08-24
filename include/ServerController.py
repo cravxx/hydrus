@@ -14,8 +14,7 @@ import sys
 import time
 import traceback
 import twisted.internet.ssl
-from twisted.internet import reactor
-from twisted.internet import defer
+from twisted.internet import threads, reactor, defer
 
 def ProcessStartingAction( db_dir, action ):
     
@@ -42,6 +41,8 @@ def ProcessStartingAction( db_dir, action ):
                     return 'restart'
                     
                 
+            
+            HG.shutting_down_due_to_already_running = True
             
             raise HydrusExceptions.ShutdownException( 'Exiting!' )
             
@@ -170,90 +171,6 @@ class Controller( HydrusController.HydrusController ):
         return ServerDB.DB( self, self.db_dir, 'server' )
         
     
-    def StartService( self, service ):
-        
-        def TWISTEDDoIt():
-            
-            service_key = service.GetServiceKey()
-            service_type = service.GetServiceType()
-            
-            def Start( *args, **kwargs ):
-                
-                try:
-                    
-                    time.sleep( 1 )
-                    
-                    port = service.GetPort()
-                    
-                    if HydrusNetworking.LocalPortInUse( port ):
-                        
-                        raise Exception( 'Something was already bound to port ' + str( port ) )
-                        
-                    
-                    if service_type == HC.SERVER_ADMIN:
-                        
-                        http_factory = ServerServer.HydrusServiceAdmin( service )
-                        
-                    elif service_type == HC.FILE_REPOSITORY:
-                        
-                        http_factory = ServerServer.HydrusServiceRepositoryFile( service )
-                        
-                    elif service_type == HC.TAG_REPOSITORY:
-                        
-                        http_factory = ServerServer.HydrusServiceRepositoryTag( service )
-                        
-                    else:
-                        
-                        return
-                        
-                    
-                    ( ssl_cert_path, ssl_key_path ) = self.db.GetSSLPaths()
-                    
-                    sslmethod = twisted.internet.ssl.SSL.TLSv1_2_METHOD
-                    
-                    context_factory = twisted.internet.ssl.DefaultOpenSSLContextFactory( ssl_key_path, ssl_cert_path, sslmethod )
-                    
-                    self._service_keys_to_connected_ports[ service_key ] = reactor.listenSSL( port, http_factory, context_factory )
-                    
-                    if not HydrusNetworking.LocalPortInUse( port ):
-                        
-                        raise Exception( 'Tried to bind port ' + str( port ) + ' but it failed.' )
-                        
-                    
-                except Exception as e:
-                    
-                    HydrusData.Print( traceback.format_exc() )
-                    
-                
-            
-            if service_key in self._service_keys_to_connected_ports:
-                
-                deferred = defer.maybeDeferred( self._service_keys_to_connected_ports[ service_key ].stopListening )
-                
-                deferred.addCallback( Start )
-                
-            else:
-                
-                Start()
-                
-            
-            
-        
-        reactor.callFromThread( TWISTEDDoIt )
-        
-    
-    def StopService( self, service_key ):
-        
-        def TWISTEDDoIt():
-            
-            deferred = defer.maybeDeferred( self._service_keys_to_connected_ports[ service_key ].stopListening )
-            
-            del self._service_keys_to_connected_ports[ service_key ]
-            
-        
-        reactor.callFromThread( TWISTEDDoIt )
-        
-    
     def DeleteOrphans( self ):
         
         self.WriteSynchronous( 'delete_orphans' )
@@ -261,7 +178,7 @@ class Controller( HydrusController.HydrusController ):
     
     def Exit( self ):
         
-        HydrusData.Print( 'Shutting down daemons and services\u2026' )
+        HydrusData.Print( 'Shutting down daemons\u2026' )
         
         self.ShutdownView()
         
@@ -269,7 +186,10 @@ class Controller( HydrusController.HydrusController ):
         
         self.ShutdownModel()
         
-        HydrusData.CleanRunningFile( self.db_dir, 'server' )
+        if not HG.shutting_down_due_to_already_running:
+            
+            HydrusData.CleanRunningFile( self.db_dir, 'server' )
+            
         
     
     def GetFilesDir( self ):
@@ -307,10 +227,7 @@ class Controller( HydrusController.HydrusController ):
             
         else:
             
-            for service in self._services:
-                
-                self.StartService( service )
-                
+            self.SetRunningTwistedServices( self._services )
             
         
         #
@@ -358,7 +275,7 @@ class Controller( HydrusController.HydrusController ):
         
         self.InitModel()
         
-        HydrusData.Print( 'Initialising daemons and services\u2026' )
+        HydrusData.Print( 'Initialising daemons\u2026' )
         
         self.InitView()
         
@@ -366,8 +283,8 @@ class Controller( HydrusController.HydrusController ):
         
         try:
             
-            while not self._model_shutdown and not self._shutdown:
-            
+            while not HG.model_shutdown and not self._shutdown:
+                
                 time.sleep( 1 )
                 
             
@@ -406,9 +323,112 @@ class Controller( HydrusController.HydrusController ):
         return self._admin_service.ServerBandwidthOK()
         
     
+    def SetRunningTwistedServices( self, services ):
+        
+        def TWISTEDDoIt():
+            
+            def StartServices( *args, **kwargs ):
+                
+                HydrusData.Print( 'Starting services\u2026' )
+                
+                for service in services:
+                    
+                    service_key = service.GetServiceKey()
+                    service_type = service.GetServiceType()
+                    
+                    try:
+                        
+                        port = service.GetPort()
+                        
+                        if service_type == HC.SERVER_ADMIN:
+                            
+                            http_factory = ServerServer.HydrusServiceAdmin( service )
+                            
+                        elif service_type == HC.FILE_REPOSITORY:
+                            
+                            http_factory = ServerServer.HydrusServiceRepositoryFile( service )
+                            
+                        elif service_type == HC.TAG_REPOSITORY:
+                            
+                            http_factory = ServerServer.HydrusServiceRepositoryTag( service )
+                            
+                        else:
+                            
+                            return
+                            
+                        
+                        ( ssl_cert_path, ssl_key_path ) = self.db.GetSSLPaths()
+                        
+                        sslmethod = twisted.internet.ssl.SSL.TLSv1_2_METHOD
+                        
+                        context_factory = twisted.internet.ssl.DefaultOpenSSLContextFactory( ssl_key_path, ssl_cert_path, sslmethod )
+                        
+                        self._service_keys_to_connected_ports[ service_key ] = reactor.listenSSL( port, http_factory, context_factory )
+                        
+                        if not HydrusNetworking.LocalPortInUse( port ):
+                            
+                            raise Exception( 'Tried to bind port {} for "{}" but it failed.'.format( port, service.GetName() ) )
+                            
+                        
+                    except Exception as e:
+                        
+                        HydrusData.Print( traceback.format_exc() )
+                        
+                    
+                
+                HydrusData.Print( 'Services started' )
+                
+            
+            if len( self._service_keys_to_connected_ports ) > 0:
+                
+                HydrusData.Print( 'Stopping services\u2026' )
+                
+                deferreds = []
+                
+                for port in self._service_keys_to_connected_ports.values():
+                    
+                    deferred = defer.maybeDeferred( port.stopListening )
+                    
+                    deferreds.append( deferred )
+                    
+                
+                self._service_keys_to_connected_ports = {}
+                
+                deferred = defer.DeferredList( deferreds )
+                
+                if len( services ) > 0:
+                    
+                    deferred.addCallback( StartServices )
+                    
+                
+            elif len( services ) > 0:
+                
+                StartServices()
+                
+            
+        
+        threads.blockingCallFromThread( reactor, TWISTEDDoIt )
+        
+    
     def SetServices( self, services ):
         
         # doesn't need the dirty_object_lock because the caller takes it
+        
+        # first test available ports
+        
+        my_ports = { s.GetPort() for s in self._services }
+        
+        for service in services:
+            
+            port = service.GetPort()
+            
+            if port not in my_ports and HydrusNetworking.LocalPortInUse( port ):
+                
+                raise HydrusExceptions.ServerException( 'Something was already bound to port ' + str( port ) )
+                
+            
+        
+        #
         
         self._services = services
         
@@ -419,30 +439,12 @@ class Controller( HydrusController.HydrusController ):
         current_service_keys = set( self._service_keys_to_connected_ports.keys() )
         future_service_keys = set( [ service.GetServiceKey() for service in self._services ] )
         
-        stop_service_keys = current_service_keys.difference( future_service_keys )
-        
-        for service_key in stop_service_keys:
-            
-            self.StopService( service_key )
-            
-        
-        for service in self._services:
-            
-            self.StartService( service )
-            
+        self.SetRunningTwistedServices( self._services )
         
     
     def ShutdownView( self ):
         
-        for service in self._services:
-            
-            service_key = service.GetServiceKey()
-            
-            if service_key in self._service_keys_to_connected_ports:
-                
-                self.StopService( service_key )
-                
-            
+        self.SetRunningTwistedServices( [] )
         
         HydrusController.HydrusController.ShutdownView( self )
         

@@ -16,6 +16,7 @@ from . import ClientCaches
 from . import ClientData
 from . import ClientDaemons
 from . import ClientDefaults
+from . import ClientDownloading
 from . import ClientFiles
 from . import ClientGUIMenus
 from . import ClientGUIShortcuts
@@ -42,17 +43,53 @@ from . import ClientConstants as CC
 from . import ClientDB
 from . import ClientGUI
 from . import ClientGUIDialogs
+from . import ClientGUIDialogsQuick
 from . import ClientGUIScrolledPanelsManagement
 from . import ClientGUITopLevelWindows
 import gc
 import psutil
+import signal
 import threading
 import time
 import traceback
 
 if not HG.twisted_is_broke:
     
-    from twisted.internet import reactor, defer
+    from twisted.internet import threads, reactor, defer
+    
+class App( wx.App ):
+    
+    def __init__( self, *args, **kwargs ):
+        
+        wx.App.__init__( self, *args, **kwargs )
+        
+        self.Bind( wx.EVT_QUERY_END_SESSION, self.EventQueryEndSession )
+        self.Bind( wx.EVT_END_SESSION, self.EventEndSession )
+        
+    
+    def EventEndSession( self, event ):
+        
+        HG.emergency_exit = True
+        
+        HG.client_controller.gui.Exit()
+        
+        if event.CanVeto(): # if any more time is offered, take it
+            
+            event.Veto()
+            
+        
+    
+    def EventQueryEndSession( self, event ):
+        
+        HG.emergency_exit = True
+        
+        HG.client_controller.gui.Exit()
+        
+        if event.CanVeto(): # if any more time is offered, take it
+            
+            event.Veto()
+            
+        
     
 class Controller( HydrusController.HydrusController ):
     
@@ -195,7 +232,7 @@ class Controller( HydrusController.HydrusController ):
         
         while not job_key.IsDone():
             
-            if self._model_shutdown:
+            if HG.model_shutdown:
                 
                 raise HydrusExceptions.ShutdownException( 'Application is shutting down!' )
                 
@@ -230,7 +267,10 @@ class Controller( HydrusController.HydrusController ):
         
         job = ClientThreading.WXAwareJob( self, job_scheduler, window, initial_delay, call )
         
-        job_scheduler.AddJob( job )
+        if job_scheduler is not None:
+            
+            job_scheduler.AddJob( job )
+            
         
         return job
         
@@ -243,13 +283,26 @@ class Controller( HydrusController.HydrusController ):
         
         job = ClientThreading.WXAwareRepeatingJob( self, job_scheduler, window, initial_delay, period, call )
         
-        job_scheduler.AddJob( job )
+        if job_scheduler is not None:
+            
+            job_scheduler.AddJob( job )
+            
         
         return job
         
     
-    def CheckAlreadyRunning( self ):
+    def CatchSignal( self, sig, frame ):
+        
+        if sig == signal.SIGINT:
+            
+            event = wx.CloseEvent( wx.wxEVT_CLOSE_WINDOW, -1 )
+            
+            wx.QueueEvent( self.gui, event )
+            
+        
     
+    def CheckAlreadyRunning( self ):
+        
         while HydrusData.IsAlreadyRunning( self.db_dir, 'client' ):
             
             self.pub( 'splash_set_status_text', 'client already running' )
@@ -260,12 +313,13 @@ class Controller( HydrusController.HydrusController ):
                 message += os.linesep * 2
                 message += 'If the old instance is closing and does not quit for a _very_ long time, it is usually safe to force-close it from task manager.'
                 
-                with ClientGUIDialogs.DialogYesNo( self._splash, message, 'The client is already running.', yes_label = 'wait a bit, then try again', no_label = 'forget it' ) as dlg:
+                result = ClientGUIDialogsQuick.GetYesNo( self._splash, message, title = 'The client is already running.', yes_label = 'wait a bit, then try again', no_label = 'forget it' )
+                
+                if result != wx.ID_YES:
                     
-                    if dlg.ShowModal() != wx.ID_YES:
-                        
-                        raise HydrusExceptions.ShutdownException()
-                        
+                    HG.shutting_down_due_to_already_running = True
+                    
+                    raise HydrusExceptions.ShutdownException()
                     
                 
             
@@ -338,6 +392,11 @@ class Controller( HydrusController.HydrusController ):
     
     def CurrentlyIdle( self ):
         
+        if HG.program_is_shutting_down:
+            
+            return True
+            
+        
         if HG.force_idle_mode:
             
             self._idle_started = 0
@@ -400,6 +459,11 @@ class Controller( HydrusController.HydrusController ):
     
     def CurrentlyVeryIdle( self ):
         
+        if HG.program_is_shutting_down:
+            
+            return True
+            
+        
         if self._idle_started is not None and HydrusData.TimeHasPassed( self._idle_started + 3600 ):
             
             return True
@@ -439,12 +503,19 @@ class Controller( HydrusController.HydrusController ):
     
     def Exit( self ):
         
+        HG.program_is_shutting_down = True
+        
         if HG.emergency_exit:
+            
+            HydrusData.DebugPrint( 'doing fast shutdown\u2026' )
             
             self.ShutdownView()
             self.ShutdownModel()
             
-            HydrusData.CleanRunningFile( self.db_dir, 'client' )
+            if not HG.shutting_down_due_to_already_running:
+                
+                HydrusData.CleanRunningFile( self.db_dir, 'client' )
+                
             
         else:
             
@@ -757,6 +828,12 @@ class Controller( HydrusController.HydrusController ):
         
         #
         
+        self.quick_download_manager = ClientDownloading.QuickDownloadManager( self )
+        
+        self.CallToThreadLongRunning( self.quick_download_manager.MainLoop )
+        
+        #
+        
         self.shortcuts_manager = ClientGUIShortcuts.ShortcutsManager( self )
         
         self.local_booru_manager = ClientCaches.LocalBooruCache( self )
@@ -790,7 +867,6 @@ class Controller( HydrusController.HydrusController ):
         self.CallBlockingToWX( self._splash, wx_code )
         
         self.sub( self, 'ToClipboard', 'clipboard' )
-        self.sub( self, 'RestartClientServerService', 'restart_client_server_service' )
         
     
     def InitView( self ):
@@ -840,14 +916,12 @@ class Controller( HydrusController.HydrusController ):
         
         HydrusController.HydrusController.InitView( self )
         
-        self._listening_services = {}
+        self._service_keys_to_connected_ports = {}
         
-        self.RestartClientServerService( CC.LOCAL_BOORU_SERVICE_KEY )
-        self.RestartClientServerService( CC.CLIENT_API_SERVICE_KEY )
+        self.RestartClientServerServices()
         
         if not HG.no_daemons:
             
-            self._daemons.append( HydrusThreading.DAEMONForegroundWorker( self, 'DownloadFiles', ClientDaemons.DAEMONDownloadFiles, ( 'notify_new_downloads', 'notify_new_permissions' ) ) )
             self._daemons.append( HydrusThreading.DAEMONForegroundWorker( self, 'SynchroniseSubscriptions', ClientDaemons.DAEMONSynchroniseSubscriptions, ( 'notify_restart_subs_sync_daemon', 'notify_new_subscriptions' ), period = 4 * 3600, init_wait = 60, pre_call_wait = 3 ) )
             self._daemons.append( HydrusThreading.DAEMONForegroundWorker( self, 'MaintainTrash', ClientDaemons.DAEMONMaintainTrash, init_wait = 120 ) )
             self._daemons.append( HydrusThreading.DAEMONForegroundWorker( self, 'SynchroniseRepositories', ClientDaemons.DAEMONSynchroniseRepositories, ( 'notify_restart_repo_sync_daemon', 'notify_new_permissions', 'wake_idle_workers' ), period = 4 * 3600, pre_call_wait = 1 ) )
@@ -926,35 +1000,21 @@ class Controller( HydrusController.HydrusController ):
             return
             
         
+        tree_stop_time = stop_time
+        
+        if tree_stop_time is None:
+            
+            tree_stop_time = HydrusData.GetNow() + 30
+            
+        
+        self.WriteSynchronous( 'maintain_similar_files_tree', stop_time = tree_stop_time )
+        
+        if self.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
+            
+            return
+            
+        
         if self.new_options.GetBoolean( 'maintain_similar_files_duplicate_pairs_during_idle' ):
-            
-            phashes_stop_time = stop_time
-            
-            if phashes_stop_time is None:
-                
-                phashes_stop_time = HydrusData.GetNow() + 15
-                
-            
-            self.WriteSynchronous( 'maintain_similar_files_phashes', stop_time = phashes_stop_time )
-            
-            if self.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
-                
-                return
-                
-            
-            tree_stop_time = stop_time
-            
-            if tree_stop_time is None:
-                
-                tree_stop_time = HydrusData.GetNow() + 30
-                
-            
-            self.WriteSynchronous( 'maintain_similar_files_tree', stop_time = tree_stop_time, abandon_if_other_work_to_do = True )
-            
-            if self.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
-                
-                return
-                
             
             search_distance = self.new_options.GetInteger( 'similar_files_duplicate_pairs_search_distance' )
             
@@ -965,7 +1025,7 @@ class Controller( HydrusController.HydrusController ):
                 search_stop_time = HydrusData.GetNow() + 60
                 
             
-            self.WriteSynchronous( 'maintain_similar_files_search_for_potential_duplicates', search_distance, stop_time = search_stop_time, abandon_if_other_work_to_do = True )
+            self.WriteSynchronous( 'maintain_similar_files_search_for_potential_duplicates', search_distance, stop_time = search_stop_time )
             
         
         if self.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
@@ -1030,7 +1090,7 @@ class Controller( HydrusController.HydrusController ):
         
         disk_cache_maintenance_mb = self.new_options.GetNoneableInteger( 'disk_cache_maintenance_mb' )
         
-        if disk_cache_maintenance_mb is not None and not self._view_shutdown:
+        if disk_cache_maintenance_mb is not None and not HG.view_shutdown:
             
             cache_period = 3600
             disk_cache_stop_time = HydrusData.GetNow() + 2
@@ -1118,95 +1178,13 @@ class Controller( HydrusController.HydrusController ):
         self._timestamps[ 'last_page_change' ] = HydrusData.GetNow()
         
     
-    def RestartClientServerService( self, service_key ):
+    def RestartClientServerServices( self ):
         
-        service = self.services_manager.GetService( service_key )
-        service_type = service.GetServiceType()
+        services = [ self.services_manager.GetService( service_key ) for service_key in ( CC.LOCAL_BOORU_SERVICE_KEY, CC.CLIENT_API_SERVICE_KEY ) ]
         
-        name = service.GetName()
+        services = [ service for service in services if service.GetPort() is not None ]
         
-        port = service.GetPort()
-        allow_non_local_connections = service.AllowsNonLocalConnections()
-        
-        def TWISTEDRestartServer():
-            
-            def StartServer( *args, **kwargs ):
-                
-                try:
-                    
-                    time.sleep( 1 )
-                    
-                    if HydrusNetworking.LocalPortInUse( port ):
-                    
-                        text = 'The client\'s {} could not start because something was already bound to port {}.'.format( name, port )
-                        text += os.linesep * 2
-                        text += 'This usually means another hydrus client is already running and occupying that port. It could be a previous instantiation of this client that has yet to completely shut itself down.'
-                        text += os.linesep * 2
-                        text += 'You can change the port this service tries to host on under services->manage services.'
-                        
-                        HydrusData.ShowText( text )
-                        
-                        return
-                        
-                    
-                    from . import ClientLocalServer
-                    
-                    if service_type == HC.LOCAL_BOORU:
-                        
-                        twisted_server = ClientLocalServer.HydrusServiceBooru( service, allow_non_local_connections = allow_non_local_connections )
-                        
-                    elif service_type == HC.CLIENT_API_SERVICE:
-                        
-                        twisted_server = ClientLocalServer.HydrusServiceClientAPI( service, allow_non_local_connections = allow_non_local_connections )
-                        
-                    
-                    listening_connection = reactor.listenTCP( port, twisted_server )
-                    
-                    self._listening_services[ service_key ] = listening_connection
-                    
-                    if not HydrusNetworking.LocalPortInUse( port ):
-                        
-                        text = 'Tried to bind port ' + str( port ) + ' for the local booru, but it appeared to fail. It could be a firewall or permissions issue, or perhaps another program was quietly already using it.'
-                        
-                        HydrusData.ShowText( text )
-                        
-                    
-                except Exception as e:
-                    
-                    wx.CallAfter( HydrusData.ShowException, e )
-                    
-                
-            
-            if service_key in self._listening_services:
-                
-                listening_connection = self._listening_services[ service_key ]
-                
-                del self._listening_services[ service_key ]
-                
-                deferred = defer.maybeDeferred( listening_connection.stopListening )
-                
-                if port is not None:
-                    
-                    deferred.addCallback( StartServer )
-                    
-                
-            else:
-                
-                if port is not None:
-                    
-                    StartServer()
-                    
-                
-            
-        
-        if HG.twisted_is_broke:
-            
-            HydrusData.ShowText( 'Twisted failed to import, so could not start the {}! Please contact hydrus dev!'.format( name ) )
-            
-        else:
-            
-            reactor.callFromThread( TWISTEDRestartServer )
-            
+        self.CallToThread( self.SetRunningTwistedServices, services )
         
     
     def RestoreDatabase( self ):
@@ -1257,7 +1235,7 @@ class Controller( HydrusController.HydrusController ):
     
     def Run( self ):
         
-        self._app = wx.App()
+        self._app = App()
         
         self._app.locale = wx.Locale( wx.LANGUAGE_DEFAULT ) # Very important to init this here and keep it non garbage collected
         
@@ -1269,6 +1247,8 @@ class Controller( HydrusController.HydrusController ):
         self.frame_icon = wx.Icon( os.path.join( HC.STATIC_DIR, 'hydrus_32_non-transparent.png' ), wx.BITMAP_TYPE_PNG )
         
         self.CreateSplash()
+        
+        signal.signal( signal.SIGINT, self.CatchSignal )
         
         self.CallToThreadLongRunning( self.THREADBootEverything )
         
@@ -1325,6 +1305,100 @@ class Controller( HydrusController.HydrusController ):
             
         
     
+    def SetRunningTwistedServices( self, services ):
+        
+        def TWISTEDDoIt():
+            
+            def StartServices( *args, **kwargs ):
+                
+                HydrusData.Print( 'starting services\u2026' )
+                
+                for service in services:
+                    
+                    service_key = service.GetServiceKey()
+                    service_type = service.GetServiceType()
+                    
+                    name = service.GetName()
+                    
+                    port = service.GetPort()
+                    allow_non_local_connections = service.AllowsNonLocalConnections()
+                    
+                    if port is None:
+                        
+                        continue
+                        
+                    
+                    try:
+                        
+                        from . import ClientLocalServer
+                        
+                        if service_type == HC.LOCAL_BOORU:
+                            
+                            http_factory = ClientLocalServer.HydrusServiceBooru( service, allow_non_local_connections = allow_non_local_connections )
+                            
+                        elif service_type == HC.CLIENT_API_SERVICE:
+                            
+                            http_factory = ClientLocalServer.HydrusServiceClientAPI( service, allow_non_local_connections = allow_non_local_connections )
+                            
+                        
+                        self._service_keys_to_connected_ports[ service_key ] = reactor.listenTCP( port, http_factory )
+                        
+                        if not HydrusNetworking.LocalPortInUse( port ):
+                            
+                            HydrusData.ShowText( 'Tried to bind port {} for "{}" but it failed.'.format( port, name ) )
+                            
+                        
+                    except Exception as e:
+                        
+                        HydrusData.ShowText( 'Could not start "{}":'.format( name ) )
+                        HydrusData.ShowException( e )
+                        
+                    
+                
+                HydrusData.Print( 'services started' )
+                
+            
+            if len( self._service_keys_to_connected_ports ) > 0:
+                
+                HydrusData.Print( 'stopping services\u2026' )
+                
+                deferreds = []
+                
+                for port in self._service_keys_to_connected_ports.values():
+                    
+                    deferred = defer.maybeDeferred( port.stopListening )
+                    
+                    deferreds.append( deferred )
+                    
+                
+                self._service_keys_to_connected_ports = {}
+                
+                deferred = defer.DeferredList( deferreds )
+                
+                if len( services ) > 0:
+                    
+                    deferred.addCallback( StartServices )
+                    
+                
+            elif len( services ) > 0:
+                
+                StartServices()
+                
+            
+        
+        if HG.twisted_is_broke:
+            
+            if True in ( service.GetPort() is not None for service in services ):
+                
+                HydrusData.ShowText( 'Twisted failed to import, so could not start the local booru/client api! Please contact hydrus dev!' )
+                
+            
+        else:
+            
+            threads.blockingCallFromThread( reactor, TWISTEDDoIt )
+            
+        
+    
     def SetServices( self, services ):
         
         with HG.dirty_object_lock:
@@ -1338,15 +1412,14 @@ class Controller( HydrusController.HydrusController ):
             self.services_manager.RefreshServices()
             
         
+        self.RestartClientServerServices()
+        
     
     def ShutdownModel( self ):
         
-        if not HG.emergency_exit:
-            
-            self.file_viewing_stats_manager.Flush()
-            
-            self.SaveDirtyObjects()
-            
+        self.file_viewing_stats_manager.Flush()
+        
+        self.SaveDirtyObjects()
         
         HydrusController.HydrusController.ShutdownModel( self )
         
@@ -1370,6 +1443,8 @@ class Controller( HydrusController.HydrusController ):
                     ClientData.ReportShutdownException()
                     
                 
+            
+            self.SetRunningTwistedServices( [] )
             
         
         HydrusController.HydrusController.ShutdownView( self )
@@ -1487,7 +1562,10 @@ class Controller( HydrusController.HydrusController ):
             
             self.pub( 'splash_set_title_text', 'cleaning up\u2026' )
             
-            HydrusData.CleanRunningFile( self.db_dir, 'client' )
+            if not HG.shutting_down_due_to_already_running:
+                
+                HydrusData.CleanRunningFile( self.db_dir, 'client' )
+                
             
         except ( HydrusExceptions.InsufficientCredentialsException, HydrusExceptions.ShutdownException ):
             
@@ -1631,7 +1709,7 @@ class Controller( HydrusController.HydrusController ):
         
         while True:
             
-            if self._view_shutdown:
+            if HG.view_shutdown:
                 
                 raise HydrusExceptions.ShutdownException( 'Application shutting down!' )
                 

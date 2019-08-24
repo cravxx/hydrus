@@ -701,6 +701,8 @@ class FilenameTaggingOptionsPanel( wx.Panel ):
         
         def EnterTags( self, tags ):
             
+            HG.client_controller.Write( 'push_recent_tags', self._service_key, tags )
+            
             tag_parents_manager = HG.client_controller.tag_parents_manager
             
             parents = set()
@@ -722,6 +724,8 @@ class FilenameTaggingOptionsPanel( wx.Panel ):
             
         
         def EnterTagsSingle( self, tags ):
+            
+            HG.client_controller.Write( 'push_recent_tags', self._service_key, tags )
             
             tag_parents_manager = HG.client_controller.tag_parents_manager
             
@@ -1080,25 +1084,25 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._mimes.SetValue( mimes )
         
-        self._action_successful.SelectClientData( actions[ CC.STATUS_SUCCESSFUL_AND_NEW ] )
+        self._action_successful.SetValue( actions[ CC.STATUS_SUCCESSFUL_AND_NEW ] )
         if CC.STATUS_SUCCESSFUL_AND_NEW in action_locations:
             
             self._location_successful.SetPath( action_locations[ CC.STATUS_SUCCESSFUL_AND_NEW ] )
             
         
-        self._action_redundant.SelectClientData( actions[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] )
+        self._action_redundant.SetValue( actions[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] )
         if CC.STATUS_SUCCESSFUL_BUT_REDUNDANT in action_locations:
             
             self._location_redundant.SetPath( action_locations[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] )
             
         
-        self._action_deleted.SelectClientData( actions[ CC.STATUS_DELETED ] )
+        self._action_deleted.SetValue( actions[ CC.STATUS_DELETED ] )
         if CC.STATUS_DELETED in action_locations:
             
             self._location_deleted.SetPath( action_locations[ CC.STATUS_DELETED ] )
             
         
-        self._action_failed.SelectClientData( actions[ CC.STATUS_ERROR ] )
+        self._action_failed.SetValue( actions[ CC.STATUS_ERROR ] )
         if CC.STATUS_ERROR in action_locations:
             
             self._location_failed.SetPath( action_locations[ CC.STATUS_ERROR ] )
@@ -1230,7 +1234,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _CheckLocations( self ):
         
-        if self._action_successful.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_successful.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             self._location_successful.Enable()
             
@@ -1239,7 +1243,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
             self._location_successful.Disable()
             
         
-        if self._action_redundant.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_redundant.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             self._location_redundant.Enable()
             
@@ -1248,7 +1252,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
             self._location_redundant.Disable()
             
         
-        if self._action_deleted.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_deleted.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             self._location_deleted.Enable()
             
@@ -1257,7 +1261,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
             self._location_deleted.Disable()
             
         
-        if self._action_failed.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_failed.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             self._location_failed.Enable()
             
@@ -1286,7 +1290,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
             raise HydrusExceptions.VetoException( 'You cannot set an import path that includes your install or database directory!' )
             
         
-        if self._action_successful.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_successful.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             path = self._location_successful.GetPath()
             
@@ -1301,7 +1305,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             
         
-        if self._action_redundant.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_redundant.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             path = self._location_redundant.GetPath()
             
@@ -1316,7 +1320,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             
         
-        if self._action_deleted.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_deleted.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             path = self._location_deleted.GetPath()
             
@@ -1331,7 +1335,7 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             
         
-        if self._action_failed.GetChoice() == CC.IMPORT_FOLDER_MOVE:
+        if self._action_failed.GetValue() == CC.IMPORT_FOLDER_MOVE:
             
             path = self._location_failed.GetPath()
             
@@ -1424,25 +1428,25 @@ class EditImportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
         actions = {}
         action_locations = {}
         
-        actions[ CC.STATUS_SUCCESSFUL_AND_NEW ] = self._action_successful.GetChoice()
+        actions[ CC.STATUS_SUCCESSFUL_AND_NEW ] = self._action_successful.GetValue()
         if actions[ CC.STATUS_SUCCESSFUL_AND_NEW ] == CC.IMPORT_FOLDER_MOVE:
             
             action_locations[ CC.STATUS_SUCCESSFUL_AND_NEW ] = self._location_successful.GetPath()
             
         
-        actions[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] = self._action_redundant.GetChoice()
+        actions[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] = self._action_redundant.GetValue()
         if actions[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] == CC.IMPORT_FOLDER_MOVE:
             
             action_locations[ CC.STATUS_SUCCESSFUL_BUT_REDUNDANT ] = self._location_redundant.GetPath()
             
         
-        actions[ CC.STATUS_DELETED ] = self._action_deleted.GetChoice()
+        actions[ CC.STATUS_DELETED ] = self._action_deleted.GetValue()
         if actions[ CC.STATUS_DELETED] == CC.IMPORT_FOLDER_MOVE:
             
             action_locations[ CC.STATUS_DELETED ] = self._location_deleted.GetPath()
             
         
-        actions[ CC.STATUS_ERROR ] = self._action_failed.GetChoice()
+        actions[ CC.STATUS_ERROR ] = self._action_failed.GetValue()
         if actions[ CC.STATUS_ERROR ] == CC.IMPORT_FOLDER_MOVE:
             
             action_locations[ CC.STATUS_ERROR ] = self._location_failed.GetPath()
@@ -1992,8 +1996,10 @@ class GUGKeyAndNameSelector( ClientGUICommon.BetterButton ):
         
         my_gug = domain_manager.GetGUG( self._gug_key_and_name )
         
-        gugs = domain_manager.GetGUGs()
+        gugs = list( domain_manager.GetGUGs() )
         gug_keys_to_display = domain_manager.GetGUGKeysToDisplay()
+        
+        gugs.sort( key = lambda g: g.GetName() )
         
         functional_gugs = []
         non_functional_gugs = []
@@ -2012,11 +2018,7 @@ class GUGKeyAndNameSelector( ClientGUICommon.BetterButton ):
         
         choice_tuples = [ ( gug.GetName(), gug ) for gug in functional_gugs if gug.GetGUGKey() in gug_keys_to_display ]
         
-        choice_tuples.sort()
-        
         second_choice_tuples = [ ( gug.GetName(), gug ) for gug in functional_gugs if gug.GetGUGKey() not in gug_keys_to_display ]
-        
-        second_choice_tuples.sort()
         
         if len( second_choice_tuples ) > 0:
             
@@ -2026,8 +2028,6 @@ class GUGKeyAndNameSelector( ClientGUICommon.BetterButton ):
         if len( non_functional_gugs ) > 0:
             
             non_functional_choice_tuples = [ ( gug.GetName(), gug ) for gug in non_functional_gugs ]
-            
-            non_functional_choice_tuples.sort()
             
             choice_tuples.append( ( '--non-functional galleries', -2 ) )
             

@@ -43,12 +43,17 @@ def ConvertEntryTextToSearchText( entry_text ):
     
     entry_text = ConvertTagToSearchable( entry_text )
     
-    if not IsComplexWildcard( entry_text ) and not entry_text.endswith( '*' ):
+    ( namespace, subtag ) = HydrusTags.SplitTag( entry_text )
+    
+    wildcard_text = entry_text
+    search_text = entry_text
+    
+    if len( subtag ) > 0 and not subtag.endswith( '*' ):
         
-        entry_text = entry_text + '*'
+        search_text += '*'
         
     
-    return entry_text
+    return ( wildcard_text, search_text )
     
 def FilterPredicatesBySearchText( service_key, search_text, predicates ):
     
@@ -64,7 +69,7 @@ def FilterPredicatesBySearchText( service_key, search_text, predicates ):
             
         
     
-    matching_tags = FilterTagsBySearchText( service_key, search_text, list(tags_to_predicates.keys()) )
+    matching_tags = FilterTagsBySearchText( service_key, search_text, list( tags_to_predicates.keys() ) )
     
     matches = [ tags_to_predicates[ tag ] for tag in matching_tags ]
     
@@ -84,22 +89,28 @@ def FilterTagsBySearchText( service_key, search_text, tags, search_siblings = Tr
         # \Z is end of string
         # \s is whitespace
         
-        if s.startswith( '.*' ):
+        if r'\:' in s:
             
-            beginning = '(\\A|:)'
+            beginning = r'\A'
+            
+            s = s.replace( r'\:', r'(\:|.*\s)', 1 )
+            
+        elif s.startswith( '.*' ):
+            
+            beginning = r'(\A|\:)'
             
         else:
             
-            beginning = '(\\A|:|\\s)'
+            beginning = r'(\A|\:|\s)'
             
         
         if s.endswith( '.*' ):
             
-            end = '\\Z' # end of string
+            end = r'\Z' # end of string
             
         else:
             
-            end = '(\\s|\\Z)' # whitespace or end of string
+            end = r'(\s|\Z)' # whitespace or end of string
             
         
         return re.compile( beginning + s + end )
@@ -381,6 +392,8 @@ class FileSystemPredicates( object ):
         
         self._duplicate_count_predicates = []
         
+        self._king_filter = None
+        
         self._file_viewing_stats_predicates = []
         
         new_options = HG.client_controller.new_options
@@ -408,11 +421,18 @@ class FileSystemPredicates( object ):
                 self._common_info[ 'known_url_rules' ].append( ( operator, rule_type, rule ) )
                 
             
+            if predicate_type == HC.PREDICATE_TYPE_SYSTEM_HAS_AUDIO:
+                
+                has_audio = value
+                
+                self._common_info[ 'has_audio' ] = has_audio
+                
+            
             if predicate_type == HC.PREDICATE_TYPE_SYSTEM_HASH:
                 
-                ( hash, hash_type ) = value
+                ( hashes, hash_type ) = value
                 
-                self._common_info[ 'hash' ] = ( hash, hash_type )
+                self._common_info[ 'hash' ] = ( hashes, hash_type )
                 
             
             if predicate_type == HC.PREDICATE_TYPE_SYSTEM_AGE:
@@ -670,16 +690,23 @@ class FileSystemPredicates( object ):
             
             if predicate_type == HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO:
                 
-                ( hash, max_hamming ) = value
+                ( hashes, max_hamming ) = value
                 
-                self._similar_to = ( hash, max_hamming )
+                self._similar_to = ( hashes, max_hamming )
                 
             
-            if predicate_type == HC.PREDICATE_TYPE_SYSTEM_DUPLICATE_RELATIONSHIP_COUNT:
+            if predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS_COUNT:
                 
                 ( operator, num_relationships, dupe_type ) = value
                 
                 self._duplicate_count_predicates.append( ( operator, num_relationships, dupe_type ) )
+                
+            
+            if predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS_KING:
+                
+                king = value
+                
+                self._king_filter = king
                 
             
             if predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_VIEWING_STATS:
@@ -706,9 +733,9 @@ class FileSystemPredicates( object ):
         return self._file_viewing_stats_predicates
         
     
-    def GetSimpleInfo( self ):
+    def GetKingFilter( self ):
         
-        return self._common_info
+        return self._king_filter
         
     
     def GetLimit( self, apply_implicit_limit = True ):
@@ -723,11 +750,25 @@ class FileSystemPredicates( object ):
         return self._limit
         
     
-    def GetRatingsPredicates( self ): return self._ratings_predicates
+    def GetSimpleInfo( self ):
+        
+        return self._common_info
+        
     
-    def GetSimilarTo( self ): return self._similar_to
+    def GetRatingsPredicates( self ):
+        
+        return self._ratings_predicates
+        
     
-    def HasSimilarTo( self ): return self._similar_to is not None
+    def GetSimilarTo( self ):
+        
+        return self._similar_to
+        
+    
+    def HasSimilarTo( self ):
+        
+        return self._similar_to is not None
+        
     
     def HasSystemEverything( self ):
         
@@ -746,7 +787,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_PREDICATE
     SERIALISABLE_NAME = 'File Search Predicate'
-    SERIALISABLE_VERSION = 2
+    SERIALISABLE_VERSION = 3
     
     def __init__( self, predicate_type = None, value = None, inclusive = True, min_current_count = 0, min_pending_count = 0, max_current_count = None, max_pending_count = None ):
         
@@ -796,9 +837,9 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO:
             
-            ( hash, max_hamming ) = self._value
+            ( hashes, max_hamming ) = self._value
             
-            serialisable_value = ( hash.hex(), max_hamming )
+            serialisable_value = ( [ hash.hex() for hash in hashes ], max_hamming )
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_KNOWN_URLS:
             
@@ -817,9 +858,9 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_HASH:
             
-            ( hash, hash_type ) = self._value
+            ( hashes, hash_type ) = self._value
             
-            serialisable_value = ( hash.hex(), hash_type )
+            serialisable_value = ( [ hash.hex() for hash in hashes ], hash_type )
             
         elif self._predicate_type == HC.PREDICATE_TYPE_OR_CONTAINER:
             
@@ -847,9 +888,9 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO:
             
-            ( serialisable_hash, max_hamming ) = serialisable_value
+            ( serialisable_hashes, max_hamming ) = serialisable_value
             
-            self._value = ( bytes.fromhex( serialisable_hash ), max_hamming )
+            self._value = ( tuple( [ bytes.fromhex( serialisable_hash ) for serialisable_hash in serialisable_hashes ] ) , max_hamming )
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_KNOWN_URLS:
             
@@ -868,9 +909,9 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_HASH:
             
-            ( serialisable_hash, hash_type ) = serialisable_value
+            ( serialisable_hashes, hash_type ) = serialisable_value
             
-            self._value = ( bytes.fromhex( serialisable_hash ), hash_type )
+            self._value = ( tuple( [ bytes.fromhex( serialisable_hash ) for serialisable_hash in serialisable_hashes ] ), hash_type )
             
         elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_AGE:
             
@@ -917,6 +958,26 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             new_serialisable_info = ( predicate_type, serialisable_value, inclusive )
             
             return ( 2, new_serialisable_info )
+            
+        
+        if version == 2:
+            
+            ( predicate_type, serialisable_value, inclusive ) = old_serialisable_info
+            
+            if predicate_type in ( HC.PREDICATE_TYPE_SYSTEM_HASH, HC.PREDICATE_TYPE_SYSTEM_SIMILAR_TO ):
+                
+                # other value is either hash type or max hamming distance
+                
+                ( serialisable_hash, other_value ) = serialisable_value
+                
+                serialisable_hashes = ( serialisable_hash, )
+                
+                serialisable_value = ( serialisable_hashes, other_value )
+                
+            
+            new_serialisable_info = ( predicate_type, serialisable_value, inclusive )
+            
+            return ( 3, new_serialisable_info )
             
         
     
@@ -1115,6 +1176,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_LOCAL: base = 'local'
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_NOT_LOCAL: base = 'not local'
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_DIMENSIONS: base = 'dimensions'
+            elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS: base = 'file relationships'
             elif self._predicate_type in ( HC.PREDICATE_TYPE_SYSTEM_NUM_TAGS, HC.PREDICATE_TYPE_SYSTEM_WIDTH, HC.PREDICATE_TYPE_SYSTEM_HEIGHT, HC.PREDICATE_TYPE_SYSTEM_NUM_WORDS ):
                 
                 if self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_NUM_TAGS: base = 'number of tags'
@@ -1153,7 +1215,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                 
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_SIZE:
                 
-                base = 'size'
+                base = 'filesize'
                 
                 if self._value is not None:
                     
@@ -1264,15 +1326,36 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                     base = description
                     
                 
+            elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_HAS_AUDIO:
+                
+                base = 'has audio'
+                
+                if self._value is not None:
+                    
+                    has_audio = self._value
+                    
+                    if not has_audio:
+                        
+                        base = 'does not have audio'
+                        
+                    
+                
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_HASH:
                 
                 base = 'hash'
                 
                 if self._value is not None:
                     
-                    ( hash, hash_type ) = self._value
+                    ( hashes, hash_type ) = self._value
                     
-                    base = hash_type + ' hash is ' + hash.hex()
+                    if len( hashes ) == 1:
+                        
+                        base = '{} hash is {}'.format( hash_type, hashes[0].hex() )
+                        
+                    else:
+                        
+                        base = '{} hash is in {} hashes'.format( hash_type, HydrusData.ToHumanInt( len( hashes ) ) )
+                        
                     
                 
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_MIME:
@@ -1380,9 +1463,9 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                 
                 if self._value is not None:
                     
-                    ( hash, max_hamming ) = self._value
+                    ( hashes, max_hamming ) = self._value
                     
-                    base += ' ' + hash.hex() + ' using max hamming of ' + str( max_hamming )
+                    base += ' {} files using max hamming of {}'.format( HydrusData.ToHumanInt( len( hashes ) ), max_hamming )
                     
                 
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_SERVICE:
@@ -1448,9 +1531,9 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                     base = n_text + o_text + HydrusData.ToHumanInt( num )
                     
                 
-            elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_DUPLICATE_RELATIONSHIP_COUNT:
+            elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS_COUNT:
                 
-                base = 'num duplicate relationships'
+                base = 'num file relationships'
                 
                 if self._value is not None:
                     
@@ -1474,6 +1557,26 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                         
                     
                     base += ' - has' + o_text + HydrusData.ToHumanInt( num_relationships ) + ' ' + HC.duplicate_type_string_lookup[ dupe_type ]
+                    
+                
+            elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS_KING:
+                
+                base = ''
+                
+                if self._value is not None:
+                    
+                    king = self._value
+                    
+                    if king:
+                        
+                        o_text = 'is the best quality file of its duplicate group'
+                        
+                    else:
+                        
+                        o_text = 'is not the best quality file of its duplicate group'
+                        
+                    
+                    base += o_text
                     
                 
             elif self._predicate_type == HC.PREDICATE_TYPE_SYSTEM_FILE_VIEWING_STATS:
@@ -1598,6 +1701,12 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                 
             
             base += ' OR '.join( ( or_predicate.ToString( render_for_user = render_for_user ) for or_predicate in or_predicates ) )
+            
+        elif self._predicate_type == HC.PREDICATE_TYPE_LABEL:
+            
+            label = self._value
+            
+            base = label
             
         
         return base

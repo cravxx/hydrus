@@ -110,6 +110,8 @@ class NetworkJob( object ):
         self._method = method
         self._url = url
         
+        self._max_connection_attempts_allowed = 5
+        
         self._domain = ClientNetworkingDomain.ConvertURLIntoDomain( self._url )
         self._second_level_domain = ClientNetworkingDomain.ConvertURLIntoSecondLevelDomain( self._url )
         
@@ -127,6 +129,8 @@ class NetworkJob( object ):
         self._creation_time = HydrusData.GetNow()
         
         self._bandwidth_tracker = HydrusNetworking.BandwidthTracker()
+        
+        self._connection_error_wake_time = 0
         
         self._wake_time = 0
         
@@ -167,9 +171,7 @@ class NetworkJob( object ):
     
     def _CanReattemptConnection( self ):
         
-        max_attempts_allowed = 3
-        
-        return self._current_connection_attempt_number <= max_attempts_allowed
+        return self._current_connection_attempt_number <= self._max_connection_attempts_allowed
         
     
     def _CanReattemptRequest( self ):
@@ -264,7 +266,7 @@ class NetworkJob( object ):
             return True
             
         
-        if self.engine.controller.ModelIsShutdown():
+        if HG.model_shutdown:
             
             return True
             
@@ -279,7 +281,7 @@ class NetworkJob( object ):
             return True
             
         
-        if self.engine.controller.ModelIsShutdown() or HydrusThreading.IsThreadShuttingDown():
+        if HG.model_shutdown or HydrusThreading.IsThreadShuttingDown():
             
             return True
             
@@ -347,7 +349,7 @@ class NetworkJob( object ):
                 
             
             if 'content-length' in response.headers:
-            
+                
                 self._num_bytes_to_read = int( response.headers[ 'content-length' ] )
                 
                 if max_allowed is not None and self._num_bytes_to_read > max_allowed:
@@ -368,6 +370,8 @@ class NetworkJob( object ):
                 
             
         
+        num_bytes_read_is_accurate = True
+        
         for chunk in response.iter_content( chunk_size = 65536 ):
             
             if self._IsCancelled():
@@ -377,11 +381,33 @@ class NetworkJob( object ):
             
             stream_dest.write( chunk )
             
-            chunk_length = len( chunk )
+            total_bytes_read = response.raw.tell()
+            
+            if total_bytes_read == 0:
+                
+                # this seems to occur when the response is chunked transfer encoding (note, no Content-Length)
+                # there's no great way to track raw bytes read in this case. the iter_content chunk can be unzipped from that
+                # nonetheless, requests does raise ChunkedEncodingError if it stops early, so not a huge deal to miss here, just slightly off bandwidth tracking
+                
+                num_bytes_read_is_accurate = False
+                
+                chunk_num_bytes = len( chunk )
+                
+                self._num_bytes_read += chunk_num_bytes
+                
+            else:
+                
+                chunk_num_bytes = total_bytes_read - self._num_bytes_read
+                
+                self._num_bytes_read = total_bytes_read
+                
             
             with self._lock:
                 
-                self._num_bytes_read += chunk_length
+                if self._num_bytes_to_read is not None and num_bytes_read_is_accurate and self._num_bytes_read > self._num_bytes_to_read:
+                    
+                    raise HydrusExceptions.NetworkException( 'Too much data: Was expecting {} but server continued responding!'.format( HydrusData.ToHumanBytes( self._num_bytes_to_read ) ) )
+                    
                 
                 if max_allowed is not None and self._num_bytes_read > max_allowed:
                     
@@ -396,7 +422,7 @@ class NetworkJob( object ):
                     
                 
             
-            self._ReportDataUsed( chunk_length )
+            self._ReportDataUsed( chunk_num_bytes )
             self._WaitOnOngoingBandwidth()
             
             if HG.view_shutdown:
@@ -405,9 +431,9 @@ class NetworkJob( object ):
                 
             
         
-        if self._num_bytes_to_read is not None and self._num_bytes_read < self._num_bytes_to_read * 0.8:
+        if self._num_bytes_to_read is not None and num_bytes_read_is_accurate and self._num_bytes_read < self._num_bytes_to_read:
             
-            raise HydrusExceptions.ShouldReattemptNetworkException( 'Was expecting ' + HydrusData.ToHumanBytes( self._num_bytes_to_read ) + ' but only got ' + HydrusData.ToHumanBytes( self._num_bytes_read ) + '.' )
+            raise HydrusExceptions.ShouldReattemptNetworkException( 'Incomplete response: Was expecting {} but actually got {} !'.format( HydrusData.ToHumanBytes( self._num_bytes_to_read ), HydrusData.ToHumanBytes( self._num_bytes_read ) ) )
             
         
     
@@ -454,13 +480,13 @@ class NetworkJob( object ):
     
     def _WaitOnConnectionError( self, status_text ):
         
-        time_to_try_again = HydrusData.GetNow() + ( ( self._current_connection_attempt_number - 1 ) * 60 )
+        self._connection_error_wake_time = HydrusData.GetNow() + ( ( self._current_connection_attempt_number - 1 ) * 10 )
         
-        while not HydrusData.TimeHasPassed( time_to_try_again ) and not self._IsCancelled():
+        while not HydrusData.TimeHasPassed( self._connection_error_wake_time ) and not self._IsCancelled():
             
             with self._lock:
                 
-                self._status_text = status_text + ' - retrying in {}'.format( HydrusData.TimestampToPrettyTimeDelta( time_to_try_again ) )
+                self._status_text = status_text + ' - retrying in {}'.format( HydrusData.TimestampToPrettyTimeDelta( self._connection_error_wake_time ) )
                 
             
             time.sleep( 1 )
@@ -591,6 +617,14 @@ class NetworkJob( object ):
                 
                 return self.engine.login_manager.CheckCanLogin( self._login_network_context )
                 
+            
+        
+    
+    def CurrentlyWaitingOnConnectionError( self ):
+        
+        with self._lock:
+            
+            return not HydrusData.TimeHasPassed( self._connection_error_wake_time )
             
         
     
@@ -809,6 +843,11 @@ class NetworkJob( object ):
         return self._ObeysBandwidth()
         
     
+    def OnlyTryConnectionOnce( self ):
+        
+        self._max_connection_attempts_allowed = 1
+        
+    
     def OverrideBandwidth( self, delay = None ):
         
         with self._lock:
@@ -825,6 +864,14 @@ class NetworkJob( object ):
                 
                 self._wake_time = min( self._wake_time, self._bandwidth_manual_override_delayed_timestamp + 1 )
                 
+            
+        
+    
+    def OverrideConnectionErrorWait( self ):
+        
+        with self._lock:
+            
+            self._connection_error_wake_time = 0
             
         
     
@@ -1111,7 +1158,7 @@ class NetworkJob( object ):
         
         with self._lock:
             
-            if self.engine.controller.ModelIsShutdown() or HydrusThreading.IsThreadShuttingDown():
+            if HG.model_shutdown or HydrusThreading.IsThreadShuttingDown():
                 
                 raise HydrusExceptions.ShutdownException()
                 

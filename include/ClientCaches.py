@@ -191,6 +191,10 @@ def CollapseTagSiblingPairs( groups_of_pairs ):
     
     return siblings
     
+def DeLoopTagSiblingPairs( groups_of_pairs ):
+    
+    pass
+    
 def LoopInSimpleChildrenToParents( simple_children_to_parents, child, parent ):
     
     potential_loop_paths = { parent }
@@ -643,7 +647,7 @@ class FileViewingStatsManager( object ):
                 if media_min is None or viewtime_delta >= media_min:
                     
                     media_views_delta = 1
-                    media_viewtime_delta = min( viewtime_delta, media_max )
+                    media_viewtime_delta = viewtime_delta
                     
                 
             
@@ -951,17 +955,20 @@ class MediaResultCache( object ):
         
         # repo sync or advanced content update occurred, so we need complete refresh
         
-        with self._lock:
+        def do_it( hash_ids ):
             
-            if len( self._hash_ids_to_media_results ) < 10000:
+            for group_of_hash_ids in HydrusData.SplitListIntoChunks( hash_ids, 256 ):
                 
-                hash_ids = list( self._hash_ids_to_media_results.keys() )
+                if HydrusThreading.IsThreadShuttingDown():
+                    
+                    return
+                    
                 
-                for group_of_hash_ids in HydrusData.SplitListIntoChunks( hash_ids, 256 ):
+                hash_ids_to_tags_managers = HG.client_controller.Read( 'force_refresh_tags_managers', group_of_hash_ids )
+                
+                with self._lock:
                     
-                    hash_ids_to_tags_managers = HG.client_controller.Read( 'force_refresh_tags_managers', group_of_hash_ids )
-                    
-                    for ( hash_id, tags_manager ) in list(hash_ids_to_tags_managers.items()):
+                    for ( hash_id, tags_manager ) in hash_ids_to_tags_managers.items():
                         
                         if hash_id in self._hash_ids_to_media_results:
                             
@@ -970,9 +977,16 @@ class MediaResultCache( object ):
                         
                     
                 
-                HG.client_controller.pub( 'notify_new_force_refresh_tags_gui' )
-                
             
+            HG.client_controller.pub( 'notify_new_force_refresh_tags_gui' )
+            
+        
+        with self._lock:
+            
+            hash_ids = list( self._hash_ids_to_media_results.keys() )
+            
+        
+        HG.client_controller.CallToThread( do_it, hash_ids )
         
     
     def NewSiblings( self ):
@@ -990,7 +1004,7 @@ class MediaResultCache( object ):
         
         with self._lock:
             
-            for ( service_key, content_updates ) in list(service_keys_to_content_updates.items()):
+            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
                 
                 for content_update in content_updates:
                     
@@ -1012,7 +1026,7 @@ class MediaResultCache( object ):
         
         with self._lock:
             
-            for ( service_key, service_updates ) in list(service_keys_to_service_updates.items()):
+            for ( service_key, service_updates ) in service_keys_to_service_updates.items():
                 
                 for service_update in service_updates:
                     
@@ -1020,7 +1034,7 @@ class MediaResultCache( object ):
                     
                     if action in ( HC.SERVICE_UPDATE_DELETE_PENDING, HC.SERVICE_UPDATE_RESET ):
                         
-                        for media_result in list(self._hash_ids_to_media_results.values()):
+                        for media_result in self._hash_ids_to_media_results.values():
                             
                             if action == HC.SERVICE_UPDATE_DELETE_PENDING:
                                 

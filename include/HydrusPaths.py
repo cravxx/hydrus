@@ -212,6 +212,13 @@ def CopyFileLikeToFileLike( f_source, f_dest ):
     
 def DeletePath( path ):
     
+    if HG.file_report_mode:
+        
+        HydrusData.ShowText( 'Deleting {}'.format( path ) )
+        
+        HydrusData.ShowText( ''.join( traceback.format_stack() ) )
+        
+    
     if os.path.exists( path ):
         
         MakeFileWritable( path )
@@ -302,21 +309,28 @@ def GetDevice( path ):
     
     path = path.lower()
     
-    partition_infos = psutil.disk_partitions( all = True )
-    
-    def sort_descending_mountpoint( partition_info ): # i.e. put '/home' before '/'
+    try:
         
-        return - len( partition_info.mountpoint )
+        partition_infos = psutil.disk_partitions( all = True )
         
-    
-    partition_infos.sort( key = sort_descending_mountpoint )
-    
-    for partition_info in partition_infos:
-        
-        if path.startswith( partition_info.mountpoint.lower() ):
+        def sort_descending_mountpoint( partition_info ): # i.e. put '/home' before '/'
             
-            return partition_info.device
+            return - len( partition_info.mountpoint )
             
+        
+        partition_infos.sort( key = sort_descending_mountpoint )
+        
+        for partition_info in partition_infos:
+            
+            if path.startswith( partition_info.mountpoint.lower() ):
+                
+                return partition_info.device
+                
+            
+        
+    except UnicodeDecodeError: # wew lad psutil on some russian lad's fun filesystem
+        
+        return None
         
     
     return None
@@ -555,16 +569,17 @@ def MakeFileWritable( path ):
         if HC.PLATFORM_WINDOWS:
             
             # this is actually the same value as S_IWUSR, but let's not try to second guess ourselves
-            desired_bit = stat.S_IWRITE
+            desired_bits = stat.S_IREAD | stat.S_IWRITE
             
         else:
             
-            desired_bit = stat.S_IWUSR
+            # guarantee 644 for regular files m8
+            desired_bits = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
             
         
-        if not desired_bit & current_bits:
+        if not ( desired_bits & current_bits ) == desired_bits:
             
-            os.chmod( path, current_bits | desired_bit )
+            os.chmod( path, current_bits | desired_bits )
             
         
     except Exception as e:
@@ -856,6 +871,13 @@ def ReadFileLikeAsBlocks( f ):
         
     
 def RecyclePath( path ):
+    
+    if HG.file_report_mode:
+        
+        HydrusData.ShowText( 'Recycling {}'.format( path ) )
+        
+        HydrusData.ShowText( ''.join( traceback.format_stack() ) )
+        
     
     if os.path.exists( path ):
         

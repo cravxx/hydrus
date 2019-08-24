@@ -232,7 +232,7 @@ class EditLoginCredentialDefinitionPanel( ClientGUIScrolledPanels.EditPanel ):
         #
         
         self._name.SetValue( credential_definition.GetName() )
-        self._credential_type.SelectClientData( credential_definition.GetType() )
+        self._credential_type.SetValue( credential_definition.GetType() )
         
         #
         
@@ -250,7 +250,7 @@ class EditLoginCredentialDefinitionPanel( ClientGUIScrolledPanels.EditPanel ):
     def GetValue( self ):
         
         name = self._name.GetValue()
-        credential_type = self._credential_type.GetChoice()
+        credential_type = self._credential_type.GetValue()
         string_match = self._string_match.GetValue()
         
         credential_definition = ClientNetworkingLogin.LoginCredentialDefinition( name = name, credential_type = credential_type, string_match = string_match )
@@ -312,8 +312,10 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
         vbox = wx.BoxSizer( wx.VERTICAL )
         
         warning = 'WARNING: Your credentials are stored in plaintext! For this and other reasons, I recommend you use throwaway accounts with hydrus!'
+        warning += os.linesep * 2
+        warning += 'If a login script does not work for you, or the site you want has a complicated captcha, check out the Hydrus Companion web browser add-on--it can copy login cookies to hydrus!'
         
-        warning_st = ClientGUICommon.BetterStaticText( self, warning )
+        warning_st = ClientGUICommon.BetterStaticText( self, warning, style = wx.ALIGN_CENTER )
         
         warning_st.SetForegroundColour( ( 128, 0, 0 ) )
         
@@ -1630,7 +1632,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 bandwidth_manager = ClientNetworkingBandwidth.NetworkBandwidthManager()
                 session_manager = ClientNetworkingSessions.NetworkSessionManager()
-                domain_manager = ClientNetworkingDomain.NetworkDomainManager()
+                domain_manager = HG.client_controller.network_engine.domain_manager.Duplicate() # keep custom headers from current domain stuff
                 login_manager = ClientNetworkingLogin.NetworkLoginManager()
                 
                 network_engine = ClientNetworking.NetworkEngine( HG.client_controller, bandwidth_manager, session_manager, domain_manager, login_manager )
@@ -2083,8 +2085,8 @@ class EditLoginStepPanel( ClientGUIScrolledPanels.EditPanel ):
         #
         
         self._name.SetValue( name )
-        self._scheme.SelectClientData( scheme )
-        self._method.SelectClientData( method )
+        self._scheme.SetValue( scheme )
+        self._method.SetValue( method )
         self._subdomain.SetValue( subdomain )
         self._path.SetValue( path )
         
@@ -2125,8 +2127,8 @@ class EditLoginStepPanel( ClientGUIScrolledPanels.EditPanel ):
     def GetValue( self ):
         
         name = self._name.GetValue()
-        scheme = self._scheme.GetChoice()
-        method = self._method.GetChoice()
+        scheme = self._scheme.GetValue()
+        method = self._method.GetValue()
         subdomain = self._subdomain.GetValue()
         path = self._path.GetValue()
         

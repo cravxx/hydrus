@@ -79,8 +79,6 @@ class MockController( object ):
     
     def __init__( self ):
         
-        self.model_is_shutdown = False
-        
         self.new_options = ClientOptions.ClientOptions()
         
     
@@ -92,11 +90,6 @@ class MockController( object ):
     def JustWokeFromSleep( self ):
         
         return False
-        
-    
-    def ModelIsShutdown( self ):
-        
-        return self.model_is_shutdown or HG.test_controller.ModelIsShutdown()
         
     
     def pub( self, *args, **kwargs ):
@@ -476,7 +469,7 @@ class Controller( object ):
         return False
         
     
-    def GetCurrentSessionPageInfoDict( self ):
+    def GetCurrentSessionPageAPIInfoDict( self ):
         
         return {
             "name" : "top pages notebook",
@@ -535,6 +528,11 @@ class Controller( object ):
         return self._managers[ manager_type ]
         
     
+    def GetPageAPIInfoDict( self, page_key, simple ):
+        
+        return {}
+        
+    
     def GetWrite( self, name ):
         
         write = self._writes[ name ]
@@ -578,11 +576,6 @@ class Controller( object ):
     def JustWokeFromSleep( self ):
         
         return False
-        
-    
-    def ModelIsShutdown( self ):
-        
-        return HG.model_shutdown
         
     
     def PageAlive( self, page_key ):
@@ -739,16 +732,16 @@ class Controller( object ):
         return False
         
     
+    def ShowPage( self, page_key ):
+        
+        self.Write( 'show_page', page_key )
+        
+    
     def TidyUp( self ):
         
         time.sleep( 2 )
         
         HydrusPaths.DeletePath( self.db_dir )
-        
-    
-    def ViewIsShutdown( self ):
-        
-        return HG.view_shutdown
         
     
     def WaitUntilModelFree( self ):

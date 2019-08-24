@@ -1,6 +1,8 @@
+from . import ClientGUIScrolledPanelsButtonQuestions
 from . import ClientGUIScrolledPanelsEdit
 from . import ClientGUITopLevelWindows
 from . import HydrusExceptions
+from . import HydrusGlobals as HG
 import wx
 
 def GetDeleteFilesJobs( win, media, default_reason, suggested_file_service_key = None ):
@@ -29,6 +31,55 @@ def GetDeleteFilesJobs( win, media, default_reason, suggested_file_service_key =
         else:
             
             raise HydrusExceptions.CancelledException()
+            
+        
+    
+def GetFinishFilteringAnswer( win, label ):
+    
+    with ClientGUITopLevelWindows.DialogCustomButtonQuestion( win, label ) as dlg:
+        
+        panel = ClientGUIScrolledPanelsButtonQuestions.QuestionFinishFilteringPanel( dlg, label )
+        
+        dlg.SetPanel( panel )
+        
+        return dlg.ShowModal()
+        
+    
+def GetInterstitialFilteringAnswer( win, label ):
+    
+    with ClientGUITopLevelWindows.DialogCustomButtonQuestion( win, label ) as dlg:
+        
+        panel = ClientGUIScrolledPanelsButtonQuestions.QuestionCommitInterstitialFilteringPanel( dlg, label )
+        
+        dlg.SetPanel( panel )
+        
+        return dlg.ShowModal()
+        
+    
+def GetYesNo( win, message, title = 'Are you sure?', yes_label = 'yes', no_label = 'no', auto_yes_time = None ):
+    
+    with ClientGUITopLevelWindows.DialogCustomButtonQuestion( win, title ) as dlg:
+        
+        panel = ClientGUIScrolledPanelsButtonQuestions.QuestionYesNoPanel( dlg, message, yes_label = yes_label, no_label = no_label )
+        
+        dlg.SetPanel( panel )
+        
+        if auto_yes_time is None:
+            
+            return dlg.ShowModal()
+            
+        else:
+            
+            job = HG.client_controller.CallLaterWXSafe( dlg, auto_yes_time, dlg.EndModal, wx.ID_YES )
+            
+            try:
+                
+                return dlg.ShowModal()
+                
+            finally:
+                
+                job.Cancel()
+                
             
         
     

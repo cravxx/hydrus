@@ -378,7 +378,7 @@ class BetterChoice( wx.Choice ):
             
         
     
-    def GetChoice( self ):
+    def GetValue( self ):
         
         selection = self.GetSelection()
         
@@ -396,11 +396,11 @@ class BetterChoice( wx.Choice ):
             
         
     
-    def SelectClientData( self, client_data ):
+    def SetValue( self, data ):
         
         for i in range( self.GetCount() ):
             
-            if client_data == self.GetClientData( i ):
+            if data == self.GetClientData( i ):
                 
                 self.Select( i )
                 
@@ -534,7 +534,7 @@ class BetterRadioBox( wx.RadioBox ):
         wx.RadioBox.__init__( self, *args, **kwargs )
         
     
-    def GetChoice( self ):
+    def GetValue( self ):
         
         index = self.GetSelection()
         
@@ -703,74 +703,106 @@ class BufferedWindowIcon( BufferedWindow ):
         self._dirty = False
         
     
-class CheckboxCollect( wx.ComboCtrl ):
+class CheckboxCollect( wx.Panel ):
     
     def __init__( self, parent, management_controller = None ):
         
-        wx.ComboCtrl.__init__( self, parent, style = wx.CB_READONLY )
+        wx.Panel.__init__( self, parent )
         
         self._management_controller = management_controller
         
         if self._management_controller is not None and self._management_controller.HasVariable( 'media_collect' ):
             
-            self._collect_by = self._management_controller.GetVariable( 'media_collect' )
+            self._media_collect = self._management_controller.GetVariable( 'media_collect' )
             
         else:
             
-            self._collect_by = HC.options[ 'default_collect' ]
+            self._media_collect = HG.client_controller.new_options.GetDefaultCollect()
             
         
-        if self._collect_by is None:
-            
-            self._collect_by = []
-            
+        self._collect_comboctrl = wx.ComboCtrl( self, style = wx.CB_READONLY )
         
-        popup = self._Popup( self._collect_by )
+        self._collect_combopopup = self._Popup( self._media_collect, self )
         
-        #self.UseAltPopupWindow( True )
+        #self._collect_comboctrl.UseAltPopupWindow( True )
         
-        self.SetPopupControl( popup )
+        self._collect_comboctrl.SetPopupControl( self._collect_combopopup )
         
-        self.SetValue( 'no collections' ) # initialising to this because if there are no collections, no broadcast call goes through
+        self._collect_unmatched = BetterChoice( self )
+        
+        width = ClientGUIFunctions.ConvertTextToPixelWidth( self._collect_unmatched, 19 )
+        
+        self._collect_unmatched.SetMinSize( ( width, -1 ) )
+        
+        self._collect_unmatched.Append( 'collect unmatched', True )
+        self._collect_unmatched.Append( 'leave unmatched', False )
+        
+        #
+        
+        self._collect_unmatched.SetValue( self._media_collect.collect_unmatched )
+        
+        #
+        
+        hbox = wx.BoxSizer( wx.HORIZONTAL )
+        
+        hbox.Add( self._collect_comboctrl, CC.FLAGS_EXPAND_BOTH_WAYS )
+        hbox.Add( self._collect_unmatched, CC.FLAGS_VCENTER )
+        
+        self.SetSizer( hbox )
+        
+        #
+        
+        self._collect_comboctrl.SetValue( 'no collections' ) # initialising to this because if there are no collections, no broadcast call goes through
+        
+        self._collect_unmatched.Bind( wx.EVT_CHOICE, self.EventChanged )
         
     
-    def GetChoice( self ):
+    def EventChanged( self, event ):
         
-        return self._collect_by
+        self.CollectValuesChanged()
         
     
-    def SetCollectTypes( self, collect_by, description ):
+    def GetValue( self ):
         
-        collect_by = list( collect_by )
+        return self._media_collect
         
-        self._collect_by = collect_by
+    
+    def CollectValuesChanged( self ):
         
-        self.SetValue( description )
+        ( namespaces, rating_service_keys, description ) = self._collect_combopopup._control.GetValues()
+        
+        collect_unmatched = self._collect_unmatched.GetValue()
+        
+        self._media_collect = ClientMedia.MediaCollect( namespaces = namespaces, rating_service_keys = rating_service_keys, collect_unmatched = collect_unmatched )
+        
+        self._collect_comboctrl.SetValue( description )
         
         if self._management_controller is not None:
             
-            self._management_controller.SetVariable( 'media_collect', collect_by )
+            self._management_controller.SetVariable( 'media_collect', self._media_collect )
             
             page_key = self._management_controller.GetKey( 'page' )
             
-            HG.client_controller.pub( 'collect_media', page_key, self._collect_by )
+            HG.client_controller.pub( 'collect_media', page_key, self._media_collect )
             
         
     
     class _Popup( wx.ComboPopup ):
         
-        def __init__( self, collect_by ):
+        def __init__( self, media_collect, parent_panel ):
             
             wx.ComboPopup.__init__( self )
             
-            self._initial_collect_by = collect_by
+            self._initial_media_collect = media_collect
+            
+            self._parent_panel = parent_panel
             
             self._control = None
             
         
         def Create( self, parent ):
             
-            self._control = self._Control( parent, self.GetComboCtrl(), self._initial_collect_by )
+            self._control = self._Control( parent, self._parent_panel, self._initial_media_collect )
             
             return True
             
@@ -802,7 +834,7 @@ class CheckboxCollect( wx.ComboCtrl ):
         
         class _Control( wx.CheckListBox ):
             
-            def __init__( self, parent, special_parent, collect_by ):
+            def __init__( self, parent, parent_panel, media_collect ):
                 
                 text_and_data_tuples = set()
                 
@@ -820,7 +852,7 @@ class CheckboxCollect( wx.ComboCtrl ):
                 
                 for ratings_service in ratings_services:
                     
-                    text_and_data_tuples.append( ( ratings_service.GetName(), ( 'rating', ratings_service.GetServiceKey().hex() ) ) )
+                    text_and_data_tuples.append( ( ratings_service.GetName(), ( 'rating', ratings_service.GetServiceKey() ) ) )
                     
                 
                 texts = [ text for ( text, data ) in text_and_data_tuples ] # we do this so it sizes its height properly on init
@@ -834,43 +866,51 @@ class CheckboxCollect( wx.ComboCtrl ):
                     self.Append( text, data )
                     
                 
-                self._special_parent = special_parent
+                self._parent_panel = parent_panel
                 
                 self.Bind( wx.EVT_CHECKLISTBOX, self.EventChanged )
                 
                 self.Bind( wx.EVT_LEFT_DOWN, self.EventLeftDown )
                 
-                wx.CallAfter( self.SetValue, collect_by )
+                wx.CallAfter( self.SetValue, media_collect )
                 
             
             def _BroadcastCollect( self ):
                 
-                ( collect_by, description ) = self._GetValues()
-                
-                self._special_parent.SetCollectTypes( collect_by, description )
+                self._parent_panel.CollectValuesChanged()
                 
             
-            def _GetValues( self ):
+            def GetValues( self ):
                 
-                collect_by = []
+                namespaces = []
+                rating_service_keys = []
                 
                 for index in self.GetCheckedItems():
                     
-                    collect_by.append( self.GetClientData( index ) )
+                    ( collect_type, collect_data ) = self.GetClientData( index )
+                    
+                    if collect_type == 'namespace':
+                        
+                        namespaces.append( collect_data )
+                        
+                    elif collect_type == 'rating':
+                        
+                        rating_service_keys.append( collect_data )
+                        
                     
                 
-                collect_by_strings = self.GetCheckedStrings()
+                collect_strings = self.GetCheckedStrings()
                 
-                if len( collect_by ) > 0:
+                if len( collect_strings ) > 0:
                     
-                    description = 'collect by ' + '-'.join( collect_by_strings )
+                    description = 'collect by ' + '-'.join( collect_strings )
                     
                 else:
                     
                     description = 'no collections'
                     
                 
-                return ( collect_by, description )
+                return ( namespaces, rating_service_keys, description )
                 
             
             # as inspired by http://trac.wxwidgets.org/attachment/ticket/14413/test_clb_workaround.py
@@ -897,29 +937,25 @@ class CheckboxCollect( wx.ComboCtrl ):
             
             def GetDescription( self ):
                 
-                ( collect_by, description ) = self._GetValues()
+                ( namespaces, rating_service_keys, description ) = self.GetValues()
                 
                 return description
                 
             
-            def SetValue( self, collect_by ):
+            def SetValue( self, media_collect ):
                 
                 try:
-                    
-                    # an old possible value, now collapsed to []
-                    if collect_by is None:
-                        
-                        collect_by = []
-                        
-                    
-                    # tuple for the set hashing
-                    desired_collect_by_rows = { tuple( item ) for item in collect_by }
                     
                     indices_to_check = []
                     
                     for index in range( self.GetCount() ):
                         
-                        if self.GetClientData( index ) in desired_collect_by_rows:
+                        ( collect_type, collect_data ) = self.GetClientData( index )
+                        
+                        p1 = collect_type == 'namespace' and collect_data in media_collect.namespaces
+                        p2 = collect_type == 'rating' and collect_data in media_collect.rating_service_keys
+                        
+                        if p1 or p2:
                             
                             indices_to_check.append( index )
                             
@@ -1028,6 +1064,8 @@ class CheckboxManagerOptions( CheckboxManager ):
         
         new_options.InvertBoolean( self._boolean_name )
         
+        HG.client_controller.pub( 'checkbox_manager_inverted' )
+        
     
 class ChoiceSort( wx.Panel ):
     
@@ -1118,8 +1156,8 @@ class ChoiceSort( wx.Panel ):
     
     def _GetCurrentSort( self ):
         
-        sort_type = self._sort_type_choice.GetChoice()
-        sort_asc = self._sort_asc_choice.GetChoice()
+        sort_type = self._sort_type_choice.GetValue()
+        sort_asc = self._sort_asc_choice.GetValue()
         
         media_sort = ClientMedia.MediaSort( sort_type, sort_asc )
         
@@ -1148,7 +1186,7 @@ class ChoiceSort( wx.Panel ):
                 asc_to_set = media_sort.sort_asc
                 
             
-            self._sort_asc_choice.SelectClientData( asc_to_set )
+            self._sort_asc_choice.SetValue( asc_to_set )
             
             self._sort_asc_choice.Enable()
             
@@ -1157,7 +1195,7 @@ class ChoiceSort( wx.Panel ):
             self._sort_asc_choice.Append( '', CC.SORT_ASC )
             self._sort_asc_choice.Append( '', CC.SORT_DESC )
             
-            self._sort_asc_choice.SelectClientData( CC.SORT_ASC )
+            self._sort_asc_choice.SetValue( CC.SORT_ASC )
             
             self._sort_asc_choice.Disable()
             
@@ -1173,7 +1211,7 @@ class ChoiceSort( wx.Panel ):
             
         
     
-    def ACollectHappened( self, page_key, collect_by ):
+    def ACollectHappened( self, page_key, media_collect ):
         
         if self._management_controller is not None:
             
@@ -1219,8 +1257,8 @@ class ChoiceSort( wx.Panel ):
     
     def SetSort( self, media_sort ):
         
-        self._sort_type_choice.SelectClientData( media_sort.sort_type )
-        self._sort_asc_choice.SelectClientData( media_sort.sort_asc )
+        self._sort_type_choice.SetValue( media_sort.sort_type )
+        self._sort_asc_choice.SetValue( media_sort.sort_asc )
         
         self._UpdateAscLabels()
         

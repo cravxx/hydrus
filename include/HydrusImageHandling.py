@@ -1,6 +1,7 @@
 from . import HydrusConstants as HC
 from . import HydrusExceptions
 from . import HydrusThreading
+import hashlib
 import io
 import numpy
 import numpy.core.multiarray # important this comes before cv!
@@ -20,7 +21,10 @@ import warnings
 
 if hasattr( PILImageFile, 'LOAD_TRUNCATED_IMAGES' ):
     
-    PILImageFile.LOAD_TRUNCATED_IMAGES = True
+    pass
+    
+    # this can now cause load hangs due to the trunc load code adding infinite fake EOFs to the file stream, wew lad
+    # PILImageFile.LOAD_TRUNCATED_IMAGES = True
     
 if not hasattr( PILImage, 'DecompressionBombWarning' ):
     
@@ -220,17 +224,11 @@ def GenerateNumPyImageFromPILImage( pil_image ):
     
 def GeneratePILImage( path ):
     
-    fp = open( path, 'rb' )
-    
     try:
         
-        pil_image = PILImage.open( fp )
+        pil_image = PILImage.open( path )
         
     except Exception as e:
-        
-        # pil doesn't clean up its open file on exception, jej
-        
-        fp.close()
         
         raise HydrusExceptions.MimeException( 'Could not load the image--it was likely malformed!' )
         
@@ -471,6 +469,12 @@ def GetGIFFrameDurations( path ):
         
     
     return frame_durations
+    
+def GetImagePixelHash( path, mime ):
+    
+    numpy_image = GenerateNumPyImage( path, mime )
+    
+    return hashlib.sha256( numpy_image.data.tobytes() ).digest()
     
 def GetImageProperties( path, mime ):
     

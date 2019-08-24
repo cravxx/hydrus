@@ -935,7 +935,7 @@ class ParseFormulaHTML( ParseFormula ):
             
         except Exception as e:
             
-            raise HydrusExceptions.ParseException( 'Unable to parse that HTML: ' + str( e ) )
+            raise HydrusExceptions.ParseException( 'Unable to parse that HTML: {}. HTML Sample: {}'.format( str( e ), parsing_text[:1024] ) )
             
         
         tags = self._FindHTMLTags( root )
@@ -1520,7 +1520,9 @@ class ParseFormulaJSON( ParseFormula ):
             
         except Exception as e:
             
-            raise HydrusExceptions.ParseException( 'Unable to parse that JSON: ' + str( e ) )
+            message = 'Unable to parse that JSON: {}. JSON sample: {}'.format( str( e ), parsing_text[:1024] )
+            
+            raise HydrusExceptions.ParseException( message )
             
         
         raw_texts = self._GetRawTextsFromJSON( j )
@@ -1870,9 +1872,9 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
                     # ->
                     # http:/www.pixiv.net/member_illust.php?illust_id=48114073&mode=medium
                     
-                    while re.search( '\shttp', u ) is not None:
+                    while re.search( r'\shttp', u ) is not None:
                         
-                        u = re.sub( '^.*\shttp', 'http', u )
+                        u = re.sub( r'^.*\shttp', 'http', u )
                         
                     
                 
@@ -2592,6 +2594,8 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             request_args[ self._file_identifier_arg_name ] = self._file_identifier_string_converter.Convert( file_identifier )
             
         
+        f = None
+        
         if self._query_type == HC.GET:
             
             if self._file_identifier_type == FILE_IDENTIFIER_TYPE_FILE:
@@ -2633,7 +2637,9 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
                     
                 else:
                     
-                    files = { self._file_identifier_arg_name : open( path, 'rb' ) }
+                    f = open( path, 'rb' )
+                    
+                    files = { self._file_identifier_arg_name : f }
                     
                 
             else:
@@ -2650,7 +2656,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
                 network_job.SetFiles( files )
                 
             
-            for ( key, value ) in list(additional_headers.items()):
+            for ( key, value ) in additional_headers.items():
                 
                 network_job.AddAdditionalHeader( key, value )
                 
@@ -2679,6 +2685,13 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             HydrusData.ShowException( e )
             
             raise
+            
+        finally:
+            
+            if f is not None:
+                
+                f.close()
+                
             
         
         if job_key.IsCancelled():

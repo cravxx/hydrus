@@ -903,6 +903,16 @@ class ListBox( wx.ScrolledWindow ):
             
         
     
+    def _CanHitIndex( self, index ):
+        
+        return True
+        
+    
+    def _CanSelectIndex( self, index ):
+        
+        return True
+        
+    
     def _Clear( self ):
         
         self._terms = set()
@@ -1011,15 +1021,51 @@ class ListBox( wx.ScrolledWindow ):
     
     def _GetSafeHitIndex( self, hit_index, direction = None ):
         
+        if direction is None:
+            
+            if hit_index == 0:
+                
+                direction = 1
+                
+            else:
+                
+                direction = -1
+                
+            
+        
+        num_terms = len( self._ordered_terms )
+        
+        if num_terms == 0:
+            
+            return None
+            
+        
+        original_hit_index = hit_index
+        
         if hit_index is not None:
             
-            if hit_index == -1 or hit_index > len( self._ordered_terms ):
+            # if click/selection is out of bounds, fix it
+            if hit_index == -1 or hit_index > num_terms:
                 
-                hit_index = len( self._ordered_terms ) - 1
+                hit_index = num_terms - 1
                 
-            elif hit_index == len( self._ordered_terms ) or hit_index < -1:
+            elif hit_index == num_terms or hit_index < -1:
                 
                 hit_index = 0
+                
+            
+            # while it is not ok to hit, move index
+            
+            while not self._CanHitIndex( hit_index ):
+                
+                hit_index = ( hit_index + direction ) % num_terms
+                
+                if hit_index == original_hit_index:
+                    
+                    # bail out if we circled around not finding an ok one to hit
+                    
+                    return None
+                    
                 
             
         
@@ -1276,6 +1322,11 @@ class ListBox( wx.ScrolledWindow ):
     
     def _Select( self, index ):
         
+        if not self._CanSelectIndex( index ):
+            
+            return
+            
+        
         term = self._GetTerm( index )
         
         self._selected_terms.add( term )
@@ -1467,6 +1518,11 @@ class ListBox( wx.ScrolledWindow ):
     def GetIdealHeight( self ):
         
         return self._text_y * len( self._ordered_terms ) + 20
+        
+    
+    def HasValues( self ):
+        
+        return len( self._ordered_terms ) > 0
         
     
     def MoveSelectionDown( self ):
@@ -1878,9 +1934,9 @@ class ListBoxTags( ListBox ):
                     
                 
             
-            ClientGUIMenus.AppendSeparator( menu )
-            
             if len( self._ordered_terms ) > len( self._selected_terms ):
+                
+                ClientGUIMenus.AppendSeparator( menu )
                 
                 ClientGUIMenus.AppendMenuItem( self, menu, 'copy all tags', 'Copy all the predicates in this list to your clipboard.', self._ProcessMenuCopyEvent, 'copy_all_tags' )
                 
@@ -1939,29 +1995,42 @@ class ListBoxTagsPredicates( ListBoxTags ):
     
     has_counts = True
     
-    def _GetWithParentIndices( self, index ):
+    def _CanHitIndex( self, index ):
         
-        indices = [ index ]
+        result = ListBoxTags._CanHitIndex( self, index )
         
-        index += 1
-        
-        while index < len( self._ordered_terms ):
+        if not result:
             
-            term = self._GetTerm( index )
-            
-            if term.GetType() == HC.PREDICATE_TYPE_PARENT:
-                
-                indices.append( index )
-                
-            else:
-                
-                break
-                
-            
-            index += 1
+            return False
             
         
-        return indices
+        term = self._GetTerm( index )
+        
+        if term.GetType() in ( HC.PREDICATE_TYPE_LABEL, HC.PREDICATE_TYPE_PARENT ):
+            
+            return False
+            
+        
+        return True
+        
+    
+    def _CanSelectIndex( self, index ):
+        
+        result = ListBoxTags._CanSelectIndex( self, index )
+        
+        if not result:
+            
+            return False
+            
+        
+        term = self._GetTerm( index )
+        
+        if term.GetType() == HC.PREDICATE_TYPE_LABEL:
+            
+            return False
+            
+        
+        return True
         
     
     def _Deselect( self, index ):
@@ -1988,30 +2057,6 @@ class ListBoxTagsPredicates( ListBoxTags ):
         return namespace
         
     
-    def _GetSafeHitIndex( self, hit_index, direction = None ):
-        
-        hit_index = ListBox._GetSafeHitIndex( self, hit_index )
-        
-        if direction is not None and hit_index is not None:
-            
-            hit_term = self._GetTerm( hit_index )
-            
-            while hit_term.GetType() == HC.PREDICATE_TYPE_PARENT:
-                
-                hit_index += direction
-                
-                if hit_index >= len( self._ordered_terms ):
-                    
-                    hit_index = 0
-                    
-                
-                hit_term = self._GetTerm( hit_index )
-                
-            
-        
-        return hit_index
-        
-    
     def _GetSimplifiedTextFromTerm( self, term ):
         
         predicate = term
@@ -2026,6 +2071,31 @@ class ListBoxTagsPredicates( ListBoxTags ):
         return predicate.ToString()
         
     
+    def _GetWithParentIndices( self, index ):
+        
+        indices = [ index ]
+        
+        index += 1
+        
+        while index < len( self._ordered_terms ):
+            
+            term = self._GetTerm( index )
+            
+            if term.GetType() == HC.PREDICATE_TYPE_PARENT:
+                
+                indices.append( index )
+                
+            else:
+                
+                break
+                
+            
+            index += 1
+            
+        
+        return indices
+        
+    
     def _HasPredicate( self, predicate ):
         
         return predicate in self._terms
@@ -2034,16 +2104,6 @@ class ListBoxTagsPredicates( ListBoxTags ):
     def _Hit( self, shift, ctrl, hit_index ):
         
         hit_index = self._GetSafeHitIndex( hit_index )
-        
-        if hit_index is not None and hit_index > 0:
-            
-            # this realigns the hit index in the up direction, so if user clicks on parent, they get the upper child
-            
-            while self._GetTerm( hit_index ).GetType() == HC.PREDICATE_TYPE_PARENT:
-                
-                hit_index -= 1
-                
-            
         
         ListBoxTags._Hit( self, shift, ctrl, hit_index )
         
@@ -2320,27 +2380,6 @@ class ListBoxTagsACWrite( ListBoxTagsAC ):
         predicate = term
         
         return predicate.ToString( sibling_service_key = self._service_key )
-        
-    
-class ListBoxTagsPredicatesORPreview( ListBoxTagsPredicates ):
-    
-    has_counts = False
-    
-    def __init__( self, parent ):
-        
-        ListBoxTagsPredicates.__init__( self, parent, height_num_chars = 1 )
-        
-    
-    def SetPredicate( self, predicate ):
-        
-        self._Clear()
-        
-        if predicate is not None:
-            
-            self._AppendTerm( predicate )
-            
-        
-        self._DataHasChanged()
         
     
 class ListBoxTagsCensorship( ListBoxTags ):
@@ -2667,6 +2706,11 @@ class ListBoxTagsStrings( ListBoxTags ):
         
     
     def ForceTagRecalc( self ):
+        
+        if self.GetTopLevelParent().IsIconized():
+            
+            return
+            
         
         self._RecalcTags()
         
@@ -3060,6 +3104,11 @@ class ListBoxTagsSelection( ListBoxTags ):
         
     
     def ForceTagRecalc( self ):
+        
+        if self.GetTopLevelParent().IsIconized():
+            
+            return
+            
         
         self.SetTagsByMedia( self._last_media, force_reload = True )
         

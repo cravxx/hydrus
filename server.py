@@ -117,6 +117,8 @@ except Exception as e:
         print( 'Critical boot error occurred! Details written to crash.log!' )
         
     
+controller = None
+
 with HydrusLogger.HydrusLogger( db_dir, 'server' ) as logger:
     
     try:
@@ -156,9 +158,13 @@ with HydrusLogger.HydrusLogger( db_dir, 'server' ) as logger:
         HG.view_shutdown = True
         HG.model_shutdown = True
         
-        try: controller.pubimmediate( 'wake_daemons' )
-        except: pass
+        if controller is not None:
+            
+            controller.pubimmediate( 'wake_daemons' )
+            
         
         reactor.callFromThread( reactor.stop )
+        
+        HydrusData.Print( 'hydrus server shut down' )
         
     

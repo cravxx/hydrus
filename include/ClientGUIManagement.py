@@ -33,6 +33,7 @@ from . import ClientTags
 from . import ClientThreading
 from . import HydrusData
 from . import HydrusGlobals as HG
+from . import HydrusTags
 from . import HydrusThreading
 import os
 import time
@@ -74,15 +75,7 @@ def CreateManagementController( page_name, management_type, file_service_key = N
     management_controller.SetType( management_type )
     management_controller.SetKey( 'file_service', file_service_key )
     management_controller.SetVariable( 'media_sort', new_options.GetDefaultSort() )
-    
-    collect_by = HC.options[ 'default_collect' ]
-    
-    if collect_by is None:
-        
-        collect_by = []
-        
-    
-    management_controller.SetVariable( 'media_collect', collect_by )
+    management_controller.SetVariable( 'media_collect', new_options.GetDefaultCollect() )
     
     return management_controller
     
@@ -527,7 +520,7 @@ class ManagementController( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_MANAGEMENT_CONTROLLER
     SERIALISABLE_NAME = 'Client Page Management Controller'
-    SERIALISABLE_VERSION = 9
+    SERIALISABLE_VERSION = 10
     
     def __init__( self, page_name = 'page' ):
         
@@ -756,6 +749,80 @@ class ManagementController( HydrusSerialisable.SerialisableBase ):
             return ( 9, new_serialisable_info )
             
         
+        if version == 9:
+            
+            ( page_name, management_type, serialisable_keys, serialisable_simples, serialisable_serialisables ) = old_serialisable_info
+            
+            if 'media_collect' in serialisable_simples:
+                
+                try:
+                    
+                    old_collect = serialisable_simples[ 'media_collect' ]
+                    
+                    if old_collect is None:
+                        
+                        old_collect = []
+                        
+                    
+                    namespaces = [ n for ( t, n ) in old_collect if t == 'namespace' ]
+                    rating_service_keys = [ bytes.fromhex( r ) for ( t, r ) in old_collect if t == 'rating' ]
+                    
+                except:
+                    
+                    namespaces = []
+                    rating_service_keys = []
+                    
+                
+                media_collect = ClientMedia.MediaCollect( namespaces = namespaces, rating_service_keys = rating_service_keys )
+                
+                serialisable_serialisables[ 'media_collect' ] = media_collect.GetSerialisableTuple()
+                
+                del serialisable_simples[ 'media_collect' ]
+                
+            
+            new_serialisable_info = ( page_name, management_type, serialisable_keys, serialisable_simples, serialisable_serialisables )
+            
+            return ( 10, new_serialisable_info )
+            
+        
+    
+    def GetAPIInfoDict( self, simple ):
+        
+        d = {}
+        
+        if self._management_type == MANAGEMENT_TYPE_IMPORT_HDD:
+            
+            hdd_import = self._serialisables[ 'hdd_import' ]
+            
+            d[ 'hdd_import' ] = hdd_import.GetAPIInfoDict( simple )
+            
+        elif self._management_type == MANAGEMENT_TYPE_IMPORT_SIMPLE_DOWNLOADER:
+            
+            simple_downloader_import = self._serialisables[ 'simple_downloader_import' ]
+            
+            d[ 'simple_downloader_import' ] = simple_downloader_import.GetAPIInfoDict( simple )
+            
+        elif self._management_type == MANAGEMENT_TYPE_IMPORT_MULTIPLE_GALLERY:
+            
+            multiple_gallery_import = self._serialisables[ 'multiple_gallery_import' ]
+            
+            d[ 'multiple_gallery_import' ] = multiple_gallery_import.GetAPIInfoDict( simple )
+            
+        elif self._management_type == MANAGEMENT_TYPE_IMPORT_MULTIPLE_WATCHER:
+            
+            multiple_watcher_import = self._serialisables[ 'multiple_watcher_import' ]
+            
+            d[ 'multiple_watcher_import' ] = multiple_watcher_import.GetAPIInfoDict( simple )
+            
+        elif self._management_type == MANAGEMENT_TYPE_IMPORT_URLS:
+            
+            urls_import = self._serialisables[ 'urls_import' ]
+            
+            d[ 'urls_import' ] = urls_import.GetAPIInfoDict( simple )
+            
+        
+        return d
+        
     
     def GetKey( self, name ):
         
@@ -884,26 +951,26 @@ class ManagementPanel( wx.lib.scrolledpanel.ScrolledPanel ):
         self._page = page
         self._page_key = self._management_controller.GetKey( 'page' )
         
-        self._sort_by = ClientGUICommon.ChoiceSort( self, management_controller = self._management_controller )
+        self._media_sort = ClientGUICommon.ChoiceSort( self, management_controller = self._management_controller )
         
-        self._collect_by = ClientGUICommon.CheckboxCollect( self, management_controller = self._management_controller )
+        self._media_collect = ClientGUICommon.CheckboxCollect( self, management_controller = self._management_controller )
         
     
-    def GetCollectBy( self ):
+    def GetMediaCollect( self ):
         
-        if self._collect_by.IsShown():
+        if self._media_collect.IsShown():
             
-            return self._collect_by.GetChoice()
+            return self._media_collect.GetValue()
             
         else:
             
-            return []
+            return ClientMedia.MediaCollect()
             
         
     
-    def GetSortBy( self ):
+    def GetMediaSort( self ):
         
-        return self._sort_by.GetSort()
+        return self._media_sort.GetSort()
         
     
     def _MakeCurrentSelectionTagsBox( self, sizer ):
@@ -986,7 +1053,12 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         self._job_key = None
         self._in_break = False
         
+        self._similar_files_maintenance_status = None
+        
         new_options = self._controller.new_options
+        
+        self._maintenance_numbers_dirty = True
+        self._dupe_count_numbers_dirty = True
         
         self._currently_refreshing_maintenance_numbers = False
         self._currently_refreshing_dupe_count_numbers = False
@@ -1001,7 +1073,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         #
         
         self._refresh_maintenance_status = ClientGUICommon.BetterStaticText( self._main_left_panel )
-        self._refresh_maintenance_button = ClientGUICommon.BetterBitmapButton( self._main_left_panel, CC.GlobalBMPs.refresh, self._RefreshMaintenanceStatus )
+        self._refresh_maintenance_button = ClientGUICommon.BetterBitmapButton( self._main_left_panel, CC.GlobalBMPs.refresh, self.RefreshMaintenanceNumbers )
         
         menu_items = []
         
@@ -1024,17 +1096,9 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         #
         
-        self._preparing_panel = ClientGUICommon.StaticBox( self._main_left_panel, 'maintenance' )
-        
-        self._num_phashes_to_regen = ClientGUICommon.BetterStaticText( self._preparing_panel )
-        self._num_branches_to_regen = ClientGUICommon.BetterStaticText( self._preparing_panel )
-        
-        self._phashes_button = ClientGUICommon.BetterBitmapButton( self._preparing_panel, CC.GlobalBMPs.play, self._RegeneratePhashes )
-        self._branches_button = ClientGUICommon.BetterBitmapButton( self._preparing_panel, CC.GlobalBMPs.play, self._RebalanceTree )
-        
-        #
-        
         self._searching_panel = ClientGUICommon.StaticBox( self._main_left_panel, 'finding potential duplicates' )
+        
+        self._eligible_files = ClientGUICommon.BetterStaticText( self._searching_panel )
         
         menu_items = []
         
@@ -1081,7 +1145,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         self._both_files_match = wx.CheckBox( self._filtering_panel )
         
         self._num_potential_duplicates = ClientGUICommon.BetterStaticText( self._filtering_panel )
-        self._refresh_dupe_counts_button = ClientGUICommon.BetterBitmapButton( self._filtering_panel, CC.GlobalBMPs.refresh, self._RefreshDuplicateCounts )
+        self._refresh_dupe_counts_button = ClientGUICommon.BetterBitmapButton( self._filtering_panel, CC.GlobalBMPs.refresh, self.RefreshDuplicateNumbers )
         
         self._launch_filter = ClientGUICommon.BetterButton( self._filtering_panel, 'launch the filter', self._LaunchFilter )
         
@@ -1112,23 +1176,8 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         #
         
-        self._sort_by.Hide()
-        self._collect_by.Hide()
-        
-        gridbox_1 = wx.FlexGridSizer( 3 )
-        
-        gridbox_1.AddGrowableCol( 0, 1 )
-        
-        gridbox_1.Add( self._num_phashes_to_regen, CC.FLAGS_VCENTER )
-        gridbox_1.Add( ( 10, 10 ), CC.FLAGS_EXPAND_PERPENDICULAR )
-        gridbox_1.Add( self._phashes_button, CC.FLAGS_VCENTER )
-        gridbox_1.Add( self._num_branches_to_regen, CC.FLAGS_VCENTER )
-        gridbox_1.Add( ( 10, 10 ), CC.FLAGS_EXPAND_PERPENDICULAR )
-        gridbox_1.Add( self._branches_button, CC.FLAGS_VCENTER )
-        
-        self._preparing_panel.Add( gridbox_1, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        
-        #
+        self._media_sort.Hide()
+        self._media_collect.Hide()
         
         distance_hbox = wx.BoxSizer( wx.HORIZONTAL )
         
@@ -1143,6 +1192,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         gridbox_2.Add( self._num_searched, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         gridbox_2.Add( self._search_button, CC.FLAGS_VCENTER )
         
+        self._searching_panel.Add( self._eligible_files, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._searching_panel.Add( distance_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._searching_panel.Add( gridbox_2, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
@@ -1158,7 +1208,6 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
         vbox.Add( hbox, CC.FLAGS_EXPAND_PERPENDICULAR )
-        vbox.Add( self._preparing_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         vbox.Add( self._searching_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         self._main_left_panel.SetSizer( vbox )
@@ -1207,8 +1256,6 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         self._controller.sub( self, 'RefreshQuery', 'refresh_query' )
         self._controller.sub( self, 'SearchImmediately', 'notify_search_immediately' )
         
-        HG.client_controller.pub( 'refresh_dupe_page_numbers' )
-        
     
     def _EditMergeOptions( self, duplicate_type ):
         
@@ -1255,19 +1302,6 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         canvas_frame.SetCanvas( canvas_window )
         
     
-    def _RebalanceTree( self ):
-        
-        job_key = ClientThreading.JobKey( cancellable = True )
-        
-        job_key.SetVariable( 'popup_title', 'initialising' )
-        
-        self._controller.Write( 'maintain_similar_files_tree', job_key = job_key )
-        
-        self._controller.pub( 'modal_message', job_key )
-        
-        self._controller.CallLater( 1.0, WaitOnDupeFilterJob, job_key )
-        
-    
     def _RefreshDuplicateCounts( self ):
         
         def wx_code( potential_duplicates_count ):
@@ -1278,6 +1312,8 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
                 
             
             self._currently_refreshing_dupe_count_numbers = False
+            
+            self._dupe_count_numbers_dirty = False
             
             self._refresh_dupe_counts_button.Enable()
             
@@ -1305,7 +1341,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
             
         
     
-    def _RefreshMaintenanceStatus( self ):
+    def _RefreshMaintenanceNumbers( self ):
         
         def wx_code( similar_files_maintenance_status ):
             
@@ -1315,6 +1351,8 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
                 
             
             self._currently_refreshing_maintenance_numbers = False
+            
+            self._maintenance_numbers_dirty = False
             
             self._refresh_maintenance_status.SetLabelText( '' )
             
@@ -1344,19 +1382,6 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
             
         
     
-    def _RegeneratePhashes( self ):
-        
-        job_key = ClientThreading.JobKey( cancellable = True )
-        
-        job_key.SetVariable( 'popup_title', 'initialising' )
-        
-        self._controller.Write( 'maintain_similar_files_phashes', job_key = job_key )
-        
-        self._controller.pub( 'modal_message', job_key )
-        
-        self._controller.CallLater( 1.0, WaitOnDupeFilterJob, job_key )
-        
-    
     def _ResetUnknown( self ):
         
         text = 'This will delete all the potential duplicate pairs and reset their files\' search status.'
@@ -1369,7 +1394,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
                 
                 self._controller.Write( 'delete_potential_duplicate_pairs' )
                 
-                self._RefreshMaintenanceStatus()
+                self._maintenance_numbers_dirty = True
                 
             
         
@@ -1385,7 +1410,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         if self._ac_read.IsSynchronised():
             
-            self._RefreshDuplicateCounts()
+            self._dupe_count_numbers_dirty = True
             
         
     
@@ -1412,7 +1437,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         if change_made:
             
-            self._RefreshDuplicateCounts()
+            self._dupe_count_numbers_dirty = True
             
             self._ShowRandomPotentialDupes()
             
@@ -1458,43 +1483,18 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         work_can_be_done = False
         
-        ( num_phashes_to_regen, num_branches_to_regen, searched_distances_to_count ) = self._similar_files_maintenance_status
+        if self._similar_files_maintenance_status is None:
+            
+            return
+            
+        
+        searched_distances_to_count = self._similar_files_maintenance_status
         
         self._cog_button.Enable()
         
-        total_num_files = max( num_phashes_to_regen, sum( searched_distances_to_count.values() ) )
+        total_num_files = sum( searched_distances_to_count.values() )
         
-        if num_phashes_to_regen == 0:
-            
-            self._num_phashes_to_regen.SetLabelText( 'All ' + HydrusData.ToHumanInt( total_num_files ) + ' eligible files up to date!' )
-            
-            self._phashes_button.Disable()
-            
-        else:
-            
-            num_done = total_num_files - num_phashes_to_regen
-            
-            self._num_phashes_to_regen.SetLabelText( HydrusData.ConvertValueRangeToPrettyString( num_done, total_num_files ) + ' eligible files up to date.' )
-            
-            self._phashes_button.Enable()
-            
-            work_can_be_done = True
-            
-        
-        if num_branches_to_regen == 0:
-            
-            self._num_branches_to_regen.SetLabelText( 'Search tree is fast!' )
-            
-            self._branches_button.Disable()
-            
-        else:
-            
-            self._num_branches_to_regen.SetLabelText( HydrusData.ToHumanInt( num_branches_to_regen ) + ' search branches to rebalance.' )
-            
-            self._branches_button.Enable()
-            
-            work_can_be_done = True
-            
+        self._eligible_files.SetLabelText( '{} eligible files in the system.'.format( HydrusData.ToHumanInt( total_num_files ) ) )
         
         self._search_distance_button.Enable()
         self._search_distance_spinctrl.Enable()
@@ -1516,7 +1516,7 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         self._search_distance_button.SetLabelText( button_label )
         
-        num_searched = sum( ( count for ( value, count ) in list(searched_distances_to_count.items()) if value is not None and value >= search_distance ) )
+        num_searched = sum( ( count for ( value, count ) in searched_distances_to_count.items() if value is not None and value >= search_distance ) )
         
         if num_searched == total_num_files:
             
@@ -1594,9 +1594,19 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
     
     def RefreshAllNumbers( self ):
         
-        self._RefreshMaintenanceStatus()
+        self.RefreshDuplicateNumbers()
         
-        self._RefreshDuplicateCounts()
+        self.RefreshMaintenanceNumbers
+        
+    
+    def RefreshDuplicateNumbers( self ):
+        
+        self._dupe_count_numbers_dirty = True
+        
+    
+    def RefreshMaintenanceNumbers( self ):
+        
+        self._maintenance_numbers_dirty = True
         
     
     def RefreshQuery( self, page_key ):
@@ -1604,6 +1614,19 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         if page_key == self._page_key:
             
             self._SearchDomainUpdated()
+            
+        
+    
+    def REPEATINGPageUpdate( self ):
+        
+        if self._maintenance_numbers_dirty:
+            
+            self._RefreshMaintenanceNumbers()
+            
+        
+        if self._dupe_count_numbers_dirty:
+            
+            self._RefreshDuplicateCounts()
             
         
     
@@ -1647,7 +1670,7 @@ class ManagementPanelImporter( ManagementPanel ):
         
         if page_key == self._page_key:
             
-            self._sort_by.BroadcastSort()
+            self._media_sort.BroadcastSort()
             
         
     
@@ -1680,9 +1703,9 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
-        self._collect_by.Hide()
+        self._media_collect.Hide()
         
         self._import_queue_panel.Add( self._current_action, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._import_queue_panel.Add( self._file_seed_cache_control, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -1851,9 +1874,9 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
-        self._collect_by.Hide()
+        self._media_collect.Hide()
         
         vbox.Add( self._gallery_downloader_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         vbox.Add( self._highlighted_gallery_import_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -2514,9 +2537,9 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
-        self._collect_by.Hide()
+        self._media_collect.Hide()
         
         vbox.Add( self._watchers_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         vbox.Add( self._highlighted_watcher_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -3249,9 +3272,9 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
-        self._collect_by.Hide()
+        self._media_collect.Hide()
         
         vbox.Add( self._simple_downloader_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -3373,7 +3396,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         urls = [ url for url in urls if url.startswith( 'http' ) ]
         
-        simple_downloader_formula = self._formulae.GetChoice()
+        simple_downloader_formula = self._formulae.GetValue()
         
         for url in urls:
             
@@ -3535,7 +3558,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
     
     def EventFormulaChanged( self, event ):
         
-        formula = self._formulae.GetChoice()
+        formula = self._formulae.GetValue()
         
         formula_name = formula.GetName()
         
@@ -3617,9 +3640,9 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
-        self._collect_by.Hide()
+        self._media_collect.Hide()
         
         vbox.Add( self._url_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -3727,6 +3750,8 @@ class ManagementPanelPetitions( ManagementPanel ):
         self._num_petition_info = None
         self._current_petition = None
         
+        self._last_petition_type_fetched = None
+        
         #
         
         self._petitions_info_panel = ClientGUICommon.StaticBox( self, 'petitions info' )
@@ -3784,6 +3809,12 @@ class ManagementPanelPetitions( ManagementPanel ):
         flip_selected = ClientGUICommon.BetterButton( self._petition_panel, 'flip selected', self._FlipSelected )
         check_none = ClientGUICommon.BetterButton( self._petition_panel, 'check none', self._CheckNone )
         
+        self._sort_by_left = ClientGUICommon.BetterButton( self._petition_panel, 'sort by left', self._SortBy, 'left' )
+        self._sort_by_right = ClientGUICommon.BetterButton( self._petition_panel, 'sort by right', self._SortBy, 'right' )
+        
+        self._sort_by_left.Disable()
+        self._sort_by_right.Disable()
+        
         self._contents = wx.CheckListBox( self._petition_panel, style = wx.LB_EXTENDED )
         self._contents.Bind( wx.EVT_LISTBOX_DCLICK, self.EventContentDoubleClick )
         
@@ -3812,18 +3843,24 @@ class ManagementPanelPetitions( ManagementPanel ):
         check_hbox.Add( flip_selected, CC.FLAGS_VCENTER_EXPAND_DEPTH_ONLY )
         check_hbox.Add( check_none, CC.FLAGS_VCENTER_EXPAND_DEPTH_ONLY )
         
+        sort_hbox = wx.BoxSizer( wx.HORIZONTAL )
+        
+        sort_hbox.Add( self._sort_by_left, CC.FLAGS_VCENTER_EXPAND_DEPTH_ONLY )
+        sort_hbox.Add( self._sort_by_right, CC.FLAGS_VCENTER_EXPAND_DEPTH_ONLY )
+        
         self._petition_panel.Add( ClientGUICommon.BetterStaticText( self._petition_panel, label = 'Double-click a petition to see its files, if it has them.' ), CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._action_text, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._reason_text, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( check_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        self._petition_panel.Add( sort_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._petition_panel.Add( self._contents, CC.FLAGS_EXPAND_BOTH_WAYS )
         self._petition_panel.Add( self._process, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._modify_petitioner, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        vbox.Add( self._collect_by, CC.FLAGS_EXPAND_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         vbox.Add( self._petitions_info_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         vbox.Add( self._petition_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
@@ -3861,6 +3898,9 @@ class ManagementPanelPetitions( ManagementPanel ):
             self._contents.Clear()
             self._process.Disable()
             
+            self._sort_by_left.Disable()
+            self._sort_by_right.Disable()
+            
             if self._can_ban:
                 
                 self._modify_petitioner.Disable()
@@ -3879,42 +3919,22 @@ class ManagementPanelPetitions( ManagementPanel ):
             
             self._reason_text.SetBackgroundColour( action_colour )
             
+            if self._last_petition_type_fetched[0] in ( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_TYPE_TAG_PARENTS ):
+                
+                self._sort_by_left.Enable()
+                self._sort_by_right.Enable()
+                
+            else:
+                
+                self._sort_by_left.Disable()
+                self._sort_by_right.Disable()
+                
+            
             contents = self._current_petition.GetContents()
             
-            def key( c ):
-                
-                if c.GetContentType() in ( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_TYPE_TAG_PARENTS ):
-                    
-                    ( part_two, part_one ) = c.GetContentData()
-                    
-                elif c.GetContentType() == HC.CONTENT_TYPE_MAPPINGS:
-                    
-                    ( tag, hashes ) = c.GetContentData()
-                    
-                    part_one = tag
-                    part_two = None
-                    
-                else:
-                    
-                    part_one = None
-                    part_two = None
-                    
-                
-                return ( -c.GetVirtualWeight(), part_one, part_two )
-                
+            contents_and_checks = [ ( c, True ) for c in contents ]
             
-            contents.sort( key = key )
-            
-            self._contents.Clear()
-            
-            for content in contents:
-                
-                content_string = self._contents.EscapeMnemonics( content.ToString() )
-                
-                self._contents.Append( content_string, content )
-                
-            
-            self._contents.SetCheckedItems( list( range( self._contents.GetCount() ) ) )
+            self._SetContentsAndChecks( contents_and_checks, 'right' )
             
             self._process.Enable()
             
@@ -3928,8 +3948,6 @@ class ManagementPanelPetitions( ManagementPanel ):
         
     
     def _DrawNumPetitions( self ):
-        
-        new_petition_fetched = False
         
         for ( content_type, status, count ) in self._num_petition_info:
             
@@ -3945,18 +3963,45 @@ class ManagementPanelPetitions( ManagementPanel ):
                     
                     button.Enable()
                     
-                    if self._current_petition is None and not new_petition_fetched:
-                        
-                        self._FetchPetition( content_type, status )
-                        
-                        new_petition_fetched = True
-                        
-                    
                 else:
                     
                     button.Disable()
                     
                 
+            
+        
+    
+    def _FetchBestPetition( self ):
+        
+        top_petition_type_with_count = None
+        
+        for ( content_type, status, count ) in self._num_petition_info:
+            
+            if count == 0:
+                
+                continue
+                
+            
+            petition_type = ( content_type, status )
+            
+            if top_petition_type_with_count is None:
+                
+                top_petition_type_with_count = petition_type
+                
+            
+            if self._last_petition_type_fetched is not None and self._last_petition_type_fetched == petition_type:
+                
+                self._FetchPetition( content_type, status )
+                
+                return
+                
+            
+        
+        if top_petition_type_with_count is not None:
+            
+            ( content_type, status ) = top_petition_type_with_count
+            
+            self._FetchPetition( content_type, status )
             
         
     
@@ -3974,6 +4019,11 @@ class ManagementPanelPetitions( ManagementPanel ):
                 self._num_petition_info = n_p_i
                 
                 self._DrawNumPetitions()
+                
+                if self._current_petition is None:
+                    
+                    self._FetchBestPetition()
+                    
                 
             
             def wx_reset():
@@ -4006,6 +4056,8 @@ class ManagementPanelPetitions( ManagementPanel ):
         
     
     def _FetchPetition( self, content_type, status ):
+        
+        self._last_petition_type_fetched = ( content_type, status )
         
         ( st, button ) = self._petition_types_to_controls[ ( content_type, status ) ]
         
@@ -4069,6 +4121,77 @@ class ManagementPanelPetitions( ManagementPanel ):
             
         
     
+    def _GetContentsAndChecks( self ):
+        
+        contents_and_checks = []
+        
+        for i in range( self._contents.GetCount() ):
+            
+            content = self._contents.GetClientData( i )
+            check = self._contents.IsChecked( i )
+            
+            contents_and_checks.append( ( content, check ) )
+            
+        
+        return contents_and_checks
+        
+    
+    def _SetContentsAndChecks( self, contents_and_checks, sort_type ):
+        
+        def key( c_and_s ):
+            
+            ( c, s ) = c_and_s
+            
+            if c.GetContentType() in ( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_TYPE_TAG_PARENTS ):
+                
+                ( left, right ) = c.GetContentData()
+                
+                if sort_type == 'left':
+                    
+                    ( part_one, part_two ) = ( HydrusTags.SplitTag( left ), HydrusTags.SplitTag( right ) )
+                    
+                elif sort_type == 'right':
+                    
+                    ( part_one, part_two ) = ( HydrusTags.SplitTag( right ), HydrusTags.SplitTag( left ) )
+                    
+                
+            elif c.GetContentType() == HC.CONTENT_TYPE_MAPPINGS:
+                
+                ( tag, hashes ) = c.GetContentData()
+                
+                part_one = HydrusTags.SplitTag( tag )
+                part_two = None
+                
+            else:
+                
+                part_one = None
+                part_two = None
+                
+            
+            return ( -c.GetVirtualWeight(), part_one, part_two )
+            
+        
+        contents_and_checks.sort( key = key )
+        
+        self._contents.Clear()
+        
+        to_check = []
+        
+        for ( i, ( content, check ) ) in enumerate( contents_and_checks ):
+            
+            content_string = self._contents.EscapeMnemonics( content.ToString() )
+            
+            self._contents.Append( content_string, content )
+            
+            if check:
+                
+                to_check.append( i )
+                
+            
+        
+        self._contents.SetCheckedItems( to_check )
+        
+    
     def _ShowHashes( self, hashes ):
         
         file_service_key = self._management_controller.GetKey( 'file_service' )
@@ -4080,11 +4203,18 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         panel = ClientGUIMedia.MediaPanelThumbnails( self._page, self._page_key, file_service_key, media_results )
         
-        panel.Collect( self._page_key, self._collect_by.GetChoice() )
+        panel.Collect( self._page_key, self._media_collect.GetValue() )
         
-        panel.Sort( self._page_key, self._sort_by.GetSort() )
+        panel.Sort( self._page_key, self._media_sort.GetSort() )
         
         self._page.SwapMediaPanel( panel )
+        
+    
+    def _SortBy( self, sort_type ):
+        
+        contents_and_checks = self._GetContentsAndChecks()
+        
+        self._SetContentsAndChecks( contents_and_checks, sort_type )
         
     
     def EventContentDoubleClick( self, event ):
@@ -4189,7 +4319,7 @@ class ManagementPanelPetitions( ManagementPanel ):
                     
                     controller.WriteSynchronous( 'content_updates', { petition_service_key : content_updates } )
                     
-                    num_done += len( chunk_of_approved_contents )
+                    num_done += 1
                     
                 
                 if len( denied_contents ) > 0:
@@ -4317,8 +4447,8 @@ class ManagementPanelQuery( ManagementPanel ):
         
         vbox = ClientGUICommon.BetterBoxSizer( wx.VERTICAL )
         
-        vbox.Add( self._sort_by, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        vbox.Add( self._collect_by, CC.FLAGS_EXPAND_PERPENDICULAR )
+        vbox.Add( self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        vbox.Add( self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         if self._search_enabled:
             
@@ -4329,7 +4459,6 @@ class ManagementPanelQuery( ManagementPanel ):
         
         self.SetSizer( vbox )
         
-        self._controller.sub( self, 'AddMediaResultsFromQuery', 'add_media_results_from_query' )
         self._controller.sub( self, 'SearchImmediately', 'notify_search_immediately' )
         self._controller.sub( self, 'RefreshQuery', 'refresh_query' )
         self._controller.sub( self, 'ChangeFileServicePubsub', 'change_file_service' )
@@ -4404,7 +4533,7 @@ class ManagementPanelQuery( ManagementPanel ):
             
         else:
             
-            self._sort_by.BroadcastSort()
+            self._media_sort.BroadcastSort()
             
         
     
@@ -4445,14 +4574,6 @@ class ManagementPanelQuery( ManagementPanel ):
                 
                 self._searchbox.ForceSizeCalcNow()
                 
-            
-        
-    
-    def AddMediaResultsFromQuery( self, query_job_key, media_results ):
-        
-        if query_job_key == self._query_job_key:
-            
-            self._controller.pub( 'add_media_results', self._page_key, media_results, append = False )
             
         
     
@@ -4534,9 +4655,9 @@ class ManagementPanelQuery( ManagementPanel ):
             
             panel = ClientGUIMedia.MediaPanelThumbnails( self._page, self._page_key, file_service_key, media_results )
             
-            panel.Collect( self._page_key, self._collect_by.GetChoice() )
+            panel.Collect( self._page_key, self._media_collect.GetValue() )
             
-            panel.Sort( self._page_key, self._sort_by.GetSort() )
+            panel.Sort( self._page_key, self._media_sort.GetSort() )
             
             self._page.SwapMediaPanel( panel )
             

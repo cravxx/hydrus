@@ -398,7 +398,12 @@ class NewDialog( wx.Dialog ):
     
     def CleanBeforeDestroy( self ):
         
-        pass
+        parent = self.GetParent()
+        
+        if parent is not None and not ClientGUIFunctions.GetTLP( parent ) == HG.client_controller.gui:
+            
+            wx.CallAfter( parent.SetFocus )
+            
         
     
     def DoOK( self ):
@@ -412,7 +417,7 @@ class NewDialog( wx.Dialog ):
         
         obj = event.GetEventObject()
         
-        event_from_us = obj is not None and ClientGUIFunctions.IsWXAncestor( self, obj )
+        event_from_us = obj is not None and ClientGUIFunctions.IsWXAncestor( obj, self )
         
         if event_from_us and key == wx.WXK_ESCAPE and not self._consumed_esc_to_cancel:
             
@@ -567,7 +572,11 @@ class DialogThatTakesScrollablePanel( DialogThatResizes ):
         vbox = wx.BoxSizer( wx.VERTICAL )
         
         vbox.Add( self._panel, CC.FLAGS_EXPAND_BOTH_WAYS )
-        vbox.Add( buttonbox, CC.FLAGS_BUTTON_SIZER )
+        
+        if buttonbox is not None:
+            
+            vbox.Add( buttonbox, CC.FLAGS_BUTTON_SIZER )
+            
         
         self.SetSizer( vbox )
         
@@ -715,6 +724,23 @@ class DialogManage( DialogApplyCancel ):
             
         
     
+class DialogCustomButtonQuestion( DialogThatTakesScrollablePanel ):
+    
+    def __init__( self, parent, title, frame_key = 'regular_center_dialog', style_override = None ):
+        
+        DialogThatTakesScrollablePanel.__init__( self, parent, title, frame_key = frame_key, style_override = style_override )
+        
+    
+    def _GetButtonBox( self ):
+        
+        return None
+        
+    
+    def _InitialiseButtons( self ):
+        
+        pass
+        
+    
 class Frame( wx.Frame ):
     
     def __init__( self, parent, title, float_on_parent = True ):
@@ -741,7 +767,12 @@ class Frame( wx.Frame ):
     
     def CleanBeforeDestroy( self ):
         
-        pass
+        parent = self.GetParent()
+        
+        if parent is not None and not ClientGUIFunctions.GetTLP( parent ) == HG.client_controller.gui:
+            
+            wx.CallAfter( parent.SetFocus )
+            
         
     
     def EventAboutToClose( self, event ):
@@ -836,6 +867,11 @@ class FrameThatTakesScrollablePanel( FrameThatResizes ):
                 ExpandTLWIfPossible( self, self._frame_key, ( desired_delta_width, desired_delta_height ) )
                 
             
+        
+    
+    def GetPanel( self ):
+        
+        return self._panel
         
     
     def SetPanel( self, panel ):

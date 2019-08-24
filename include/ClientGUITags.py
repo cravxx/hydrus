@@ -1337,7 +1337,7 @@ class ManageTagsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             #
             
-            expand_parents = True
+            expand_parents = self._new_options.GetBoolean( 'add_parents_on_manage_tags' )
             
             self._add_tag_box = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self, self.AddTags, expand_parents, self._file_service_key, self._tag_service_key, null_entry_callable = self.OK )
             
@@ -1379,6 +1379,8 @@ class ManageTagsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
                 
+            
+            HG.client_controller.sub( self, 'CheckboxExpandParents', 'checkbox_manager_inverted' )
             
         
         def _EnterTags( self, tags, only_add = False, only_remove = False, forced_reason = None ):
@@ -1987,6 +1989,11 @@ class ManageTagsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 self.EnterTags( tags, only_add = only_add )
                 
+            
+        
+        def CheckboxExpandParents( self ):
+            
+            self._add_tag_box.SetExpandParents( self._new_options.GetBoolean( 'add_parents_on_manage_tags' ) )
             
         
         def CleanBeforeDestroy( self ):
@@ -3579,6 +3586,8 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             
             if potential_new in current_olds:
                 
+                seen_tags = set()
+                
                 d = dict( current_pairs )
                 
                 next_new = potential_new
@@ -3593,6 +3602,19 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
                         
                         return False
                         
+                    
+                    if next_new in seen_tags:
+                        
+                        message = 'The pair you mean to add seems to connect to a sibling loop already in your database! Please undo this loop first. The tags involved in the loop are:'
+                        message += os.linesep * 2
+                        message += ', '.join( seen_tags )
+                        
+                        wx.MessageBox( message )
+                        
+                        return False
+                        
+                    
+                    seen_tags.add( next_new )
                     
                 
             
@@ -3794,7 +3816,7 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             
             show_all = self._show_all.GetValue()
             
-            for ( status, pairs ) in list(self._current_statuses_to_pairs.items()):
+            for ( status, pairs ) in self._current_statuses_to_pairs.items():
                 
                 if status == HC.CONTENT_STATUS_DELETED:
                     
@@ -4002,7 +4024,7 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             
             current_statuses_to_pairs = collections.defaultdict( set )
             
-            current_statuses_to_pairs.update( { key : set( value ) for ( key, value ) in list(original_statuses_to_pairs.items()) } )
+            current_statuses_to_pairs.update( { key : set( value ) for ( key, value ) in original_statuses_to_pairs.items() } )
             
             wx.CallAfter( wx_code, original_statuses_to_pairs, current_statuses_to_pairs )
             

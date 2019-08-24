@@ -2,7 +2,6 @@ from . import HydrusConstants as HC
 from . import HydrusExceptions
 from . import HydrusFileHandling
 from . import HydrusImageHandling
-from . import HydrusNetwork
 from . import HydrusNetworking
 from . import HydrusPaths
 from . import HydrusSerialisable
@@ -227,7 +226,7 @@ def ParseFileArguments( path, decompression_bombs_ok = False ):
                 
             
         
-        ( size, mime, width, height, duration, num_frames, num_words ) = HydrusFileHandling.GetFileInfo( path, mime )
+        ( size, mime, width, height, duration, num_frames, has_audio, num_words ) = HydrusFileHandling.GetFileInfo( path, mime )
         
     except Exception as e:
         
@@ -245,6 +244,7 @@ def ParseFileArguments( path, decompression_bombs_ok = False ):
     if height is not None: args[ 'height' ] = height
     if duration is not None: args[ 'duration' ] = duration
     if num_frames is not None: args[ 'num_frames' ] = num_frames
+    args[ 'has_audio' ] = has_audio
     if num_words is not None: args[ 'num_words' ] = num_words
     
     if mime in HC.MIMES_WITH_THUMBNAILS:
@@ -318,6 +318,16 @@ class HydrusResource( Resource ):
         self._checkService( request )
         
         self._checkUserAgent( request )
+        
+        return request
+        
+    
+    def _callbackEstablishAccountFromHeader( self, request ):
+        
+        return request
+        
+    
+    def _callbackEstablishAccountFromArgs( self, request ):
         
         return request
         
@@ -612,6 +622,10 @@ class HydrusResource( Resource ):
             
             response_context = ResponseContext( 509, mime = default_mime, body = default_encoding( failure.value ) )
             
+        elif failure.type == HydrusExceptions.ServerException:
+            
+            response_context = ResponseContext( 500, mime = default_mime, body = default_encoding( failure.value ) )
+            
         else:
             
             HydrusData.DebugPrint( failure.getTraceback() )
@@ -670,12 +684,12 @@ class HydrusResource( Resource ):
         
         allowed_methods = []
         
-        if self._threadDoGETJob.__func__ != HydrusResource._threadDoGETJob:
+        if self._threadDoGETJob.__func__ is not HydrusResource._threadDoGETJob:
             
             allowed_methods.append( 'GET' )
             
         
-        if self._threadDoPOSTJob.__func__ != HydrusResource._threadDoPOSTJob:
+        if self._threadDoPOSTJob.__func__ is not HydrusResource._threadDoPOSTJob:
             
             allowed_methods.append( 'POST' )
             
@@ -736,7 +750,11 @@ class HydrusResource( Resource ):
         
         d.addCallback( self._callbackCheckServiceRestrictions )
         
+        d.addCallback( self._callbackEstablishAccountFromHeader )
+        
         d.addCallback( self._callbackParseGETArgs )
+        
+        d.addCallback( self._callbackEstablishAccountFromArgs )
         
         d.addCallback( self._callbackCheckAccountRestrictions )
         
@@ -786,7 +804,11 @@ class HydrusResource( Resource ):
         
         d.addCallback( self._callbackCheckServiceRestrictions )
         
+        d.addCallback( self._callbackEstablishAccountFromHeader )
+        
         d.addCallback( self._callbackParsePOSTArgs )
+        
+        d.addCallback( self._callbackEstablishAccountFromArgs )
         
         d.addCallback( self._callbackCheckAccountRestrictions )
         

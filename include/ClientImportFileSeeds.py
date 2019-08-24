@@ -158,6 +158,11 @@ class FileImportJob( object ):
     
     def __init__( self, temp_path, file_import_options = None ):
         
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job created for path {}.'.format( temp_path ) )
+            
+        
         if file_import_options is None:
             
             file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( 'loud' )
@@ -177,16 +182,21 @@ class FileImportJob( object ):
     
     def CheckIsGoodToImport( self ):
         
-        ( size, mime, width, height, duration, num_frames, num_words ) = self._file_info
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job testing if good to import for file import options' )
+            
+        
+        ( size, mime, width, height, duration, num_frames, has_audio, num_words ) = self._file_info
         
         self._file_import_options.CheckFileIsValid( size, mime, width, height )
         
     
     def DoWork( self ):
         
-        if HG.file_report_mode:
+        if HG.file_import_report_mode:
             
-            HydrusData.ShowText( 'New file import job!' )
+            HydrusData.ShowText( 'File import job starting work.' )
             
         
         ( pre_import_status, hash, note ) = self.GenerateHashAndStatus()
@@ -208,6 +218,11 @@ class FileImportJob( object ):
             import_status = pre_import_status
             
         
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job is done, now publishing content updates' )
+            
+        
         self.PubsubContentUpdates()
         
         return ( import_status, hash, note )
@@ -219,7 +234,17 @@ class FileImportJob( object ):
         
         self._hash = HydrusFileHandling.GetHashFromPath( self._temp_path )
         
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job hash: {}'.format( self._hash.hex() ) )
+            
+        
         ( self._pre_import_status, hash, note ) = HG.client_controller.Read( 'hash_status', 'sha256', self._hash, prefix = 'file recognised' )
+        
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job pre-import status: {}, {}'.format( CC.status_string_lookup[ self._pre_import_status ], note ) )
+            
         
         return ( self._pre_import_status, self._hash, note )
         
@@ -228,11 +253,26 @@ class FileImportJob( object ):
         
         mime = HydrusFileHandling.GetMime( self._temp_path )
         
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job mime: {}'.format( HC.mime_string_lookup[ mime ] ) )
+            
+        
         new_options = HG.client_controller.new_options
         
         if mime in HC.DECOMPRESSION_BOMB_IMAGES and not self._file_import_options.AllowsDecompressionBombs():
             
+            if HG.file_import_report_mode:
+                
+                HydrusData.ShowText( 'File import job testing for decompression bomb' )
+                
+            
             if HydrusImageHandling.IsDecompressionBomb( self._temp_path ):
+                
+                if HG.file_import_report_mode:
+                    
+                    HydrusData.ShowText( 'File import job: it was a decompression bomb' )
+                    
                 
                 raise HydrusExceptions.DecompressionBombException( 'Image seems to be a Decompression Bomb!' )
                 
@@ -240,9 +280,19 @@ class FileImportJob( object ):
         
         self._file_info = HydrusFileHandling.GetFileInfo( self._temp_path, mime )
         
-        ( size, mime, width, height, duration, num_frames, num_words ) = self._file_info
+        ( size, mime, width, height, duration, num_frames, has_audio, num_words ) = self._file_info
+        
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job file info: {}'.format( self._file_info ) )
+            
         
         if mime in HC.MIMES_WITH_THUMBNAILS:
+            
+            if HG.file_import_report_mode:
+                
+                HydrusData.ShowText( 'File import job generating thumbnail' )
+                
             
             bounding_dimensions = HG.client_controller.options[ 'thumbnail_dimensions' ]
             
@@ -255,7 +305,22 @@ class FileImportJob( object ):
         
         if mime in HC.MIMES_WE_CAN_PHASH:
             
+            if HG.file_import_report_mode:
+                
+                HydrusData.ShowText( 'File import job generating phashes' )
+                
+            
             self._phashes = ClientImageHandling.GenerateShapePerceptualHashes( self._temp_path, mime )
+            
+            if HG.file_import_report_mode:
+                
+                HydrusData.ShowText( 'File import job generated {} phashes: {}'.format( len( self._phashes ), [ phash.hex() for phash in self._phashes ] ) )
+                
+            
+        
+        if HG.file_import_report_mode:
+            
+            HydrusData.ShowText( 'File import job generating other hashes' )
             
         
         self._extra_hashes = HydrusFileHandling.GetExtraHashesFromPath( self._temp_path )
@@ -283,7 +348,7 @@ class FileImportJob( object ):
     
     def GetMime( self ):
         
-        ( size, mime, width, height, duration, num_frames, num_words ) = self._file_info
+        ( size, mime, width, height, duration, num_frames, has_audio, num_words ) = self._file_info
         
         return mime
         
@@ -607,6 +672,20 @@ class FileSeed( HydrusSerialisable.SerialisableBase ):
     def FetchPageMetadata( self, tag_import_options ):
         
         pass
+        
+    
+    def GetAPIInfoDict( self, simple ):
+        
+        d = {}
+        
+        d[ 'import_data' ] = self.file_seed_data
+        d[ 'created' ] = self.created
+        d[ 'modified' ] = self.modified
+        d[ 'source_time' ] = self.source_time
+        d[ 'status' ] = self.status
+        d[ 'note' ] = self.note
+        
+        return d
         
     
     def GetExampleNetworkJob( self, network_job_factory ):
@@ -1151,6 +1230,9 @@ class FileSeed( HydrusSerialisable.SerialisableBase ):
                         for file_seed in file_seeds:
                             
                             file_seed._fixed_service_keys_to_tags = self._fixed_service_keys_to_tags.Duplicate()
+                            
+                            file_seed._urls.update( self._urls )
+                            file_seed._tags.update( self._tags )
                             
                         
                         try:
@@ -1852,6 +1934,33 @@ class FileSeedCache( HydrusSerialisable.SerialisableBase ):
             
         
         self.NotifyFileSeedsUpdated( ( file_seed, ) )
+        
+    
+    def GetAPIInfoDict( self, simple ):
+        
+        with self._lock:
+            
+            d = {}
+            
+            if self._status_dirty:
+                
+                self._GenerateStatus()
+                
+            
+            ( status, simple_status, ( total_processed, total ) ) = self._status_cache
+            
+            d[ 'status' ] = status
+            d[ 'simple_status' ] = status
+            d[ 'total_processed' ] = total_processed
+            d[ 'total_to_process' ] = total
+            
+            if not simple:
+                
+                d[ 'import_items' ] = [ file_seed.GetAPIInfoDict( simple ) for file_seed in self._file_seeds ]
+                
+            
+            return d
+            
         
     
     def GetEarliestSourceTime( self ):

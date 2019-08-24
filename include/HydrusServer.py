@@ -1,6 +1,7 @@
 from . import HydrusConstants as HC
 from . import HydrusServerResources
 import traceback
+from twisted.web.http import _GenericHTTPChannelProtocol, HTTPChannel
 from twisted.web.server import Request, Site
 from twisted.web.resource import Resource
 from . import HydrusData
@@ -19,6 +20,7 @@ class HydrusRequest( Request ):
         self.parsed_request_args = None
         self.hydrus_response_context = None
         self.hydrus_account = None
+        self.client_api_permissions = None
         
     
 class HydrusRequestLogging( HydrusRequest ):
@@ -47,6 +49,11 @@ class HydrusRequestLogging( HydrusRequest ):
         HydrusData.Print( message )
         
     
+
+class FatHTTPChannel( HTTPChannel ):
+    
+    totalHeadersSize = 1048576 # :^)
+    
 class HydrusService( Site ):
     
     def __init__( self, service ):
@@ -56,6 +63,8 @@ class HydrusService( Site ):
         root = self._InitRoot()
         
         Site.__init__( self, root )
+        
+        self.protocol = self._ProtocolFactory
         
         if service.LogsRequests():
             
@@ -78,3 +87,7 @@ class HydrusService( Site ):
         return root
         
     
+    def _ProtocolFactory( self ):
+        
+        return _GenericHTTPChannelProtocol( FatHTTPChannel() )
+        
